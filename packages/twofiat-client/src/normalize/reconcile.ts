@@ -8,7 +8,10 @@ const DAY = 86_400_000;
 export type FindingKind =
   /** The reported balance differs from the sum of the card's activities. */
   | "balance-gap"
-  /** No card-issue order, so the ledger can't start from zero and the gap is meaningless. */
+  /**
+   * No card-issue order and no opening balance: the card came with a balance whose history isn't visible (e.g. moved
+   * over from another token), so the gap can't be judged until an opening balance is set.
+   */
   | "history-incomplete"
   /** An order paid for more than it credited. */
   | "credit-shortfall"
@@ -56,12 +59,15 @@ export interface CardCosts {
 export interface CardReconciliation {
   cardId: string;
   reportedBalanceCents: number;
-  /** Sum of every activity on the card, including authorisations not yet posted. */
+  /** For a card whose history starts mid-life: its balance before the first visible row. */
+  openingBalanceCents: number | undefined;
+  /** Opening balance plus every activity on the card, including authorisations not yet posted. */
   ledgerBalanceCents: number;
   /** The part of the ledger that's authorised but not yet posted. */
   holdsCents: number;
   /** Reported minus ledger: positive means 2fiat shows more money than its rows explain. */
   gapCents: number;
+  /** The ledger starts at the card's issue, or from a given opening balance. */
   historyComplete: boolean;
   totalsByKind: Partial<Record<ActivityKind, number>>;
   costs: CardCosts;
@@ -77,6 +83,11 @@ export interface ReconcileInput {
   activities: Activity[];
   /** "Now", for staleness. Defaults to the current time. */
   asOf?: string;
+  /**
+   * Balances before the first visible row, by card id, for cards with no issue order. Typically inferred as the gap
+   * at the first sync (so later gaps measure drift from then on), or entered by the user.
+   */
+  openingBalances?: Record<string, number>;
 }
 
 const $ = (cents: number) => `$${(Math.abs(cents) / 100).toFixed(2)}`;
@@ -95,23 +106,25 @@ export function reconcile(input: ReconcileInput): CardReconciliation[] {
     for (const a of acts) totalsByKind[a.kind] = (totalsByKind[a.kind] ?? 0) + a.amountCents;
 
     const reportedBalanceCents = dollarsToCents(card.balance);
-    const ledgerBalanceCents = sum(acts);
+    const issued = acts.some((a) => a.kind === "card_issue");
+    const openingBalanceCents = issued ? undefined : input.openingBalances?.[card.id];
+    const ledgerBalanceCents = (openingBalanceCents ?? 0) + sum(acts);
     const holdsCents = sum(acts.filter((a) => a.status === "pending"));
     const gapCents = reportedBalanceCents - ledgerBalanceCents;
-    const historyComplete = acts.some((a) => a.kind === "card_issue");
+    const historyComplete = issued || openingBalanceCents !== undefined;
     if (!historyComplete) {
       findings.push({
         kind: "history-incomplete",
         activityKeys: [],
         message:
-          "The card's issue order isn't in the order history, so its balance can't be reconciled from zero.",
+          "The card's history starts mid-life (no issue order), so its balance can't be checked until an opening balance is set.",
       });
     } else if (gapCents !== 0) {
       findings.push({
         kind: "balance-gap",
         cents: gapCents,
         activityKeys: [],
-        message: `2fiat reports ${$(gapCents)} ${gapCents > 0 ? "more" : "less"} than the card's transactions and orders add up to.`,
+        message: `2fiat reports ${$(gapCents)} ${gapCents > 0 ? "more" : "less"} than the card's ${openingBalanceCents === undefined ? "" : "opening balance, "}transactions and orders add up to.`,
       });
     }
 
@@ -198,6 +211,7 @@ export function reconcile(input: ReconcileInput): CardReconciliation[] {
     return {
       cardId: card.id,
       reportedBalanceCents,
+      openingBalanceCents,
       ledgerBalanceCents,
       holdsCents,
       gapCents,

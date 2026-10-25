@@ -68,9 +68,58 @@ describe("balance", () => {
     expect(r.findings).toEqual([expect.objectContaining({ kind: "balance-gap", cents: 50000 })]);
   });
 
-  test("without an issue order the gap isn't meaningful", () => {
+  test("without an issue order or opening balance the gap isn't meaningful", () => {
     const r = reconcileOne(61.25, [], []);
+    expect(r).toMatchObject({ historyComplete: false, openingBalanceCents: undefined });
     expect(kinds(r.findings)).toEqual(["history-incomplete"]);
+  });
+
+  test("an inherited card reconciles from its opening balance", () => {
+    const rows = [
+      authorization({
+        at: "2026-10-22T10:00:00.000Z",
+        amount: "-30.00",
+        description: "SHOP SPRINGFIELD USA",
+      }),
+    ];
+    const cards = [card({ balance: 970 })];
+    const activities = normalize({ transactions: rows, orders: [], cards });
+    const asOf = "2026-10-25T00:00:00.000Z";
+
+    const [balanced] = reconcile({
+      cards,
+      transactions: rows,
+      activities,
+      asOf,
+      openingBalances: { [cards[0]?.id ?? ""]: 100000 },
+    });
+    expect(balanced).toMatchObject({
+      openingBalanceCents: 100000,
+      ledgerBalanceCents: 97000,
+      gapCents: 0,
+      findings: [],
+    });
+
+    const [drifted] = reconcile({
+      cards,
+      transactions: rows,
+      activities,
+      asOf,
+      openingBalances: { [cards[0]?.id ?? ""]: 101000 },
+    });
+    expect(drifted?.findings).toEqual([expect.objectContaining({ kind: "balance-gap", cents: -1000 })]);
+  });
+
+  test("an opening balance is ignored for a card whose issue is known", () => {
+    const cards = [card({ balance: 20 })];
+    const activities = normalize({ transactions: [], orders: [issue], cards });
+    const [r] = reconcile({
+      cards,
+      transactions: [],
+      activities,
+      openingBalances: { [cards[0]?.id ?? ""]: 5000 },
+    });
+    expect(r).toMatchObject({ openingBalanceCents: undefined, gapCents: 0 });
   });
 });
 

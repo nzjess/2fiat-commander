@@ -94,8 +94,8 @@ fee), `paid` (number in the **payment currency**: BTC for older orders, ~USD for
    `credited_fully`. Match an order to its card's top-up rows (excluding transfer-ins) after `order.createdAt` until
    they sum to `credited_usd`. That accounted for every order-funded top-up row in the account.
 10. **Refund credit.** A `TRANSACTION op 4 "Refund"` of 11.20 was followed ~15 h later by a "Top up card" `+11.20` on the
-   same card. This was the only top-up row not explained by an order or a transfer. One sample, so treat the pairing as
-   tentative.
+    same card. This was the only top-up row not explained by an order or a transfer. One sample, so treat the pairing as
+    tentative.
 
 ## Fees and terms (for reconciliation)
 
@@ -110,4 +110,6 @@ balance. Observed in a real capture:
 - **Top-ups are charged 6.5%** (`invoice.amount = 1.065 × amount` on every order), against the 6% in the description.
   The site's product tiles say 6.5% for other products.
 - **Balances don't reconcile exactly** from the card's issue onwards: most are a few dollars out, and one was out by nearly a whole order, next to an order credited only $0.01. `reconcile()` surfaces these as findings rather than explaining them away.
-
+- **Inherited cards.** A card can be moved over from an earlier token: it keeps its balance but none of the history behind it (no issue order, and rows only from the move on). Such a card can only be reconciled from an opening balance, the
+  balance just before its first visible row. `reconcile()` accepts one per card; inferring it as the gap at the first
+  sync means later gaps measure drift from then on.
