@@ -19,33 +19,35 @@ amount) and **transfer** (between the account's own cards), show up in the data 
 
 ## Endpoints (all `GET`, base `https://2fiat.com/api/v1/`)
 
-| Path | Returns |
-| --- | --- |
-| `user` | the account's user profile |
-| `cards` | `Card[]`: id, alias, balance (number), cardNumber (masked), currency, expirationDate `MM/YY`, paymentType, cardProduct |
-| `prepaid-cards/details/:cardId` | the card plus status (`"1"` = active), createdAt, expireDate (ISO), cardBal, userId, full cardProduct |
-| `vccTransactions?skip&take&dateFrom&dateTo[&cardId]` | `{ data: Tx[], totalCount }`. Leave out `cardId` to get all cards |
-| `orders?page=N` | `{ limit: 10, skip, totalCount, orders: Order[] }`, newest first |
-| `auth/login-link`, `kyc/status`, `alerts/active`, `btc-currencies`, `livechat/chat-id`, `auth/logout` | not needed |
+| Path                                                                                                  | Returns                                                                                                                |
+| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `user`                                                                                                | the account's user profile                                                                                             |
+| `cards`                                                                                               | `Card[]`: id, alias, balance (number), cardNumber (masked), currency, expirationDate `MM/YY`, paymentType, cardProduct |
+| `prepaid-cards/details/:cardId`                                                                       | the card plus status (`"1"` = active), createdAt, expireDate (ISO), cardBal, userId, full cardProduct                  |
+| `vccTransactions?skip&take&dateFrom&dateTo[&cardId]`                                                  | `{ data: Tx[], totalCount }`. Leave out `cardId` to get all cards                                                      |
+| `orders?page=N`                                                                                       | `{ limit: 10, skip, totalCount, orders: Order[] }`, newest first                                                       |
+| `auth/login-link`, `kyc/status`, `alerts/active`, `btc-currencies`, `livechat/chat-id`, `auth/logout` | not needed                                                                                                             |
 
 ### `vccTransactions`
 
 - `dateFrom` and `dateTo` are `YYYY-MM-DD` UTC days, both inclusive. Results are sorted by `createdAt` descending.
 - `take` is capped at **500** (an account-wide query with more rows than that returned only 500), so the sync must page.
-- Offset paging is not stable: paging all the rows gave one unique id too few, because new rows shift the offsets. The sync
-  dedupes by `id` and should page within bounded date windows.
+- **Offset paging drops rows.** Rows that share a `createdAt` (fee batches often do) come back in a different order on
+  every request, so consecutive pages can both repeat and skip rows. Two full pagings of the same account returned different numbers of unique rows. `TwoFiatClient.fetchTransactions` therefore never offset-pages a multi-day window: a window with
+  `totalCount <= take` is one request, and a larger one is split in half by date. Only a single day with more than 500
+  rows would be offset-paged, and then it's re-paged until all `totalCount` ids have been seen.
 - Each row embeds the full `user` object (PII). Drop it before storing.
 
 `Tx`: `id` (uuid), `cardId`, `createdAt` (ISO), `amount` (**string**), `currency`, `description`, `type`, `kind`,
 `op_type`, `status`.
 
-| type | kind | op_type | meaning |
-| --- | --- | --- | --- |
-| `AUTHORIZATION` | null | null | card purchase or refund. status `COMPLETED` / `PENDING` / `FAILED` |
-| `INTERNAL` | `topup` | 3 | top-up credited to card, `"+250.00"`, description "Top up card" |
-| `INTERNAL` | `fee` | 8 | `"-0.50"` per-authorization fee, description "Fee" |
-| `TRANSACTION` | null | 8 | "Withdraw card": outgoing side of a transfer. Amount is **unsigned** (`"200"`) but money leaves the card |
-| `TRANSACTION` | null | 4 | "Refund" (unsigned, seen once). A `+` "Top up card" row of the same amount followed ~15 h later |
+| type            | kind    | op_type | meaning                                                                                                  |
+| --------------- | ------- | ------- | -------------------------------------------------------------------------------------------------------- |
+| `AUTHORIZATION` | null    | null    | card purchase or refund. status `COMPLETED` / `PENDING` / `FAILED`                                       |
+| `INTERNAL`      | `topup` | 3       | top-up credited to card, `"+250.00"`, description "Top up card"                                          |
+| `INTERNAL`      | `fee`   | 8       | `"-0.50"` per-authorization fee, description "Fee"                                                       |
+| `TRANSACTION`   | null    | 8       | "Withdraw card": outgoing side of a transfer. Amount is **unsigned** (`"200"`) but money leaves the card |
+| `TRANSACTION`   | null    | 4       | "Refund" (unsigned, seen once). A `+` "Top up card" row of the same amount followed ~15 h later          |
 
 Amount formats seen: `"+250.00"`, `"-0.50"`, `"200"`, `"-61.250000"`, `"0.00"`. Parse to integer cents.
 
@@ -64,9 +66,9 @@ fee), `paid` (number in the **payment currency**: BTC for older orders, ~USD for
 1. **Purchase pairs.** Each purchase shows up as two `AUTHORIZATION` rows with the same amount:
    - `COMPLETED`, with a long description (`"SP SOME SHOP SPRINGFIELD USA"`, i.e. merchant + city + country), and
    - `PENDING`, with a short description that is a **prefix** of the long one (`"SP SOME SHOP"`).
-   The PENDING row came anywhere from −3 h to +20 h relative to the COMPLETED one (usually *after* it). 12 of 12 pairs in
-   one card's history matched on amount + prefix + nearest time. A purchase may also have PENDING only, if it isn't
-   settled yet.
+     The PENDING row came anywhere from −3 h to +20 h relative to the COMPLETED one (usually _after_ it). 12 of 12 pairs in
+     one card's history matched on amount + prefix + nearest time. A purchase may also have PENDING only, if it isn't
+     settled yet.
 2. **Exact duplicates.** Two refund rows (`PENDING`, `"+5.25"`, same short description) 0.3 s apart, with different ids.
 3. **$0.00 verification auths**: `"PAYMENT CHECK SPRINGFIELD USA"`. No partner rows.
 4. **Declines**: `FAILED` auths, sometimes retried seconds apart. They still incur fees.

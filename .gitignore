@@ -6,4 +6,5 @@ dist/
 *.db-*
 .DS_Store
 .idea/
+captures/
 tmp/
