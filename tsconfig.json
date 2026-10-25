@@ -1,0 +1,4 @@
+{
+  "files": [],
+  "references": [{ "path": "packages/twofiat-client" }, { "path": "apps/server" }, { "path": "apps/web" }]
+}

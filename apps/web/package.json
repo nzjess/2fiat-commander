@@ -1,0 +1,35 @@
+{
+  "name": "@twofiat/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@mantine/charts": "9.7.3",
+    "@mantine/core": "9.7.3",
+    "@mantine/dates": "9.7.3",
+    "@mantine/hooks": "9.7.3",
+    "@mantine/notifications": "9.7.3",
+    "@tanstack/react-query": "5.104.5",
+    "@tanstack/react-router": "1.170.46",
+    "@tanstack/react-table": "9.3.1",
+    "dayjs": "1.11.23",
+    "hono": "4.13.13",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "recharts": "3.10.1"
+  },
+  "devDependencies": {
+    "@tanstack/router-plugin": "1.168.48",
+    "@twofiat/server": "workspace:*",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "postcss": "8.5.31",
+    "postcss-preset-mantine": "1.18.0",
+    "vite": "8.3.5"
+  }
+}

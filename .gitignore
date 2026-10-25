@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+*.db
+*.db-*
+.DS_Store
+.idea/
+tmp/
