@@ -63,27 +63,51 @@ fee), `paid` (number in the **payment currency**: BTC for older orders, ~USD for
 
 ## Data quirks for normalisation
 
-1. **Purchase pairs.** Each purchase shows up as two `AUTHORIZATION` rows with the same amount:
-   - `COMPLETED`, with a long description (`"SP SOME SHOP SPRINGFIELD USA"`, i.e. merchant + city + country), and
-   - `PENDING`, with a short description that is a **prefix** of the long one (`"SP SOME SHOP"`).
-     The PENDING row came anywhere from −3 h to +20 h relative to the COMPLETED one (usually _after_ it). 12 of 12 pairs in
-     one card's history matched on amount + prefix + nearest time. A purchase may also have PENDING only, if it isn't
-     settled yet.
-2. **Exact duplicates.** Two refund rows (`PENDING`, `"+5.25"`, same short description) 0.3 s apart, with different ids.
-3. **$0.00 verification auths**: `"PAYMENT CHECK SPRINGFIELD USA"`. No partner rows.
-4. **Declines**: `FAILED` auths, sometimes retried seconds apart. They still incur fees.
-5. **Fees** are $0.50 per authorization (success, reversal or decline, per the product description), posted in
-   hourly batches (`HH:00:0x`). Store them as a distinct kind, **unlinked**: they're a reporting use case (fees paid
+1. **Authorisation and posting.** 2fiat's statuses are misleading. Each card payment shows up as two
+   `AUTHORIZATION` rows:
+   - `COMPLETED`: the **authorisation** at purchase time. Its description is long (`"SP SOME SHOP SPRINGFIELD USA"`, i.e.
+     merchant + city + country).
+   - `PENDING`: the later **posting**, a median of ~12 h after (seen from −21 h to +77 h). Its description is shorter
+     and often a prefix of the long one, but sometimes a different name for the same merchant
+     (`"BIGSTORE* QX7R20LM4"` vs `"BIGSTORE.CO.EX SPRINGFIELD USA"`, `"RIDEAPP *TRIP"` vs `"RDA* PENDING.RIDEAPP.COM Springfield USA"`).
+     The **posting carries the final amount**: tips added (up to ~25%), final fares (ride apps), holds netted (hotels). So the ledger takes the posted amount, and an authorisation that hasn't been posted yet is pending.
+     Pairing is scored on amount (exact, or within 35% when names match well), word overlap and time. Every posting paired in the real capture.
+2. **Holds and releases.** A hold reversed in full (an authorisation of `-X`, then `+X` from the same merchant shortly
+   after) means the payment was voided. A partial release (`+75.00` after a `-400.19` hotel hold) is already netted in
+   that purchase's posting (`-325.20`), so it is folded in, not counted again. Authorised minus released can differ
+   from the posting by FX rounding (a few cents).
+3. **Exact duplicates.** Identical posting rows <1 s apart with no authorisation of their own are double
+   notifications (`"+5.25"` twice, 0.3 s apart). But identical postings that each have an authorisation are real
+   repeat charges, so duplicates are only collapsed after pairing.
+4. **$0.00 verification auths**: `"PAYMENT CHECK SPRINGFIELD USA"`. No partner rows.
+5. **Declines**: `FAILED` auths, sometimes retried seconds apart. They still incur fees.
+6. **Fees** are $0.50 each, posted in batches on even hours (`HH:00:0x`). The terms say per authorisation, but
+   postings are charged too (see Fees and terms below). Store them as a distinct kind, **unlinked**: they're a reporting use case (fees paid
    over time), not something to attach to purchases.
-6. **Transfers** are a pair: `TRANSACTION op 8 "Withdraw card"` (unsigned amount) on the source card and
+7. **Transfers** are a pair: `TRANSACTION op 8 "Withdraw card"` (unsigned amount) on the source card and
    `INTERNAL topup "Top up card"` (`+amount`) on the destination card, **exactly 1 s later**. Every transfer in the account matched this way. A "Top up card" row is therefore either a transfer-in or an order-funded top-up.
-7. **Top-ups exist in two sources**: an `orders` row (createdAt = when the invoice was created; `credited_usd` is the
+8. **Top-ups exist in two sources**: an `orders` row (createdAt = when the invoice was created; `credited_usd` is the
    USD that landed) and an `INTERNAL topup` tx a few minutes after crediting. Top-up txs were introduced recently;
    older top-ups exist **only** as orders. The issue order's $20 starting balance has no tx row either.
-8. **Split credits.** Occasionally an order is credited in parts: a small amount at top-up time and the remainder later.
+9. **Split credits.** Occasionally an order is credited in parts: a small amount at top-up time and the remainder later.
    Seen twice, for example 250 = 10.00 + 240.00, with the remainder a couple of hours later, both with order status
    `credited_fully`. Match an order to its card's top-up rows (excluding transfer-ins) after `order.createdAt` until
    they sum to `credited_usd`. That accounted for every order-funded top-up row in the account.
-9. **Refund credit.** A `TRANSACTION op 4 "Refund"` of 11.20 was followed ~15 h later by a "Top up card" `+11.20` on the
+10. **Refund credit.** A `TRANSACTION op 4 "Refund"` of 11.20 was followed ~15 h later by a "Top up card" `+11.20` on the
    same card. This was the only top-up row not explained by an order or a transfer. One sample, so treat the pairing as
    tentative.
+
+## Fees and terms (for reconciliation)
+
+The Regular product's description advertises: card $50 including a $20 starting balance,
+"Per transaction authorization (success, reversal, or decline): $0.50", and "Top-up fee: 6%".
+`cardProduct.metadata` has `starting_deposit: 20` and `topup_fee: 0.065`; the issue order itself carries no starting
+balance. Observed in a real capture:
+
+- **Fee rows start in mid-September 2026.** There are none before, on any card.
+- **Postings are charged too.** Since then, fee rows ≈ authorisations + postings + declines (exactly on some cards, a few short on others). So a purchase costs
+  $1.00 in fees, not the advertised $0.50.
+- **Top-ups are charged 6.5%** (`invoice.amount = 1.065 × amount` on every order), against the 6% in the description.
+  The site's product tiles say 6.5% for other products.
+- **Balances don't reconcile exactly** from the card's issue onwards: most are a few dollars out, and one was out by nearly a whole order, next to an order credited only $0.01. `reconcile()` surfaces these as findings rather than explaining them away.
+

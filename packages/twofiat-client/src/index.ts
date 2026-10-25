@@ -1,5 +1,26 @@
 export { MAX_PAGE_SIZE, type OrderQuery, type TransactionQuery, TwoFiatClient } from "./client.ts";
 export { TwoFiatAuthError, TwoFiatError, TwoFiatSchemaError } from "./errors.ts";
+export { parseCents } from "./normalize/money.ts";
+export { type NormalizeInput, normalize } from "./normalize/normalize.ts";
+export {
+  type CardCosts,
+  type CardReconciliation,
+  type FeeAudit,
+  type Finding,
+  type FindingKind,
+  type ReconcileInput,
+  reconcile,
+} from "./normalize/reconcile.ts";
+export { type ProductTerms, productTerms } from "./normalize/terms.ts";
+export { descriptionSimilarity } from "./normalize/text.ts";
+export {
+  type Activity,
+  type ActivityFlag,
+  type ActivityKind,
+  type ActivityStatus,
+  LOOKBACK_DAYS,
+  NORMALIZER_VERSION,
+} from "./normalize/types.ts";
 export {
   RawCard,
   RawCardDetails,

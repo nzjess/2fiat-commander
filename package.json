@@ -10,7 +10,8 @@
     "test": "vitest run",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "capture": "node --env-file=.env packages/twofiat-client/scripts/capture.ts"
+    "capture": "node --env-file=.env packages/twofiat-client/scripts/capture.ts",
+    "report": "node packages/twofiat-client/scripts/report.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.3",
