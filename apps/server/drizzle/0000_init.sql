@@ -129,6 +129,7 @@ CREATE TABLE `cards` (
 	`issued_at` text,
 	`expires_at` text,
 	`raw` text NOT NULL,
+	`missing_since` text,
 	`first_seen_at` text NOT NULL,
 	`updated_at` text NOT NULL,
 	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade,

@@ -23,7 +23,7 @@ import { CardSelect } from "../../../../../components/CardPageHeader.tsx";
 import { FindingList } from "../../../../../components/FindingList.tsx";
 import { AnchorLink } from "../../../../../components/links.tsx";
 import { SpendingChart } from "../../../../../components/SpendingChart.tsx";
-import { GapBadge, OpeningBadge, TransientBadge } from "../../../../../components/status.tsx";
+import { GapBadge, MissingBadge, OpeningBadge, TransientBadge } from "../../../../../components/status.tsx";
 import {
   cardLabel,
   formatDate,
@@ -107,9 +107,12 @@ function LogicalCardPage() {
         />
       </Group>
       <Group align="flex-start" gap="xl">
-        <CardFace card={current} balanceCents={logical.balance?.reportedCents} width={340} />
+        <CardFace card={current} balanceCents={logical.reportedCents} width={340} />
         <Stack gap={4}>
-          <Name accountId={accountId} logical={logical} />
+          <Group gap="xs">
+            <Name accountId={accountId} logical={logical} />
+            {current.missingSince && <MissingBadge since={current.missingSince} />}
+          </Group>
           <Text c="dimmed" size="sm">
             {cardLabel(current)} · {current.product} · expires {formatMonth(current.expiresAt)}
             {!isActive(current) && ` · status ${current.status}`}
@@ -389,6 +392,7 @@ function PhysicalCards({
                       Current
                     </Badge>
                   )}
+                  {card.missingSince && <MissingBadge since={card.missingSince} />}
                   {!isActive(card) && (
                     <Badge size="xs" color="gray">
                       Status {card.status}
@@ -399,12 +403,10 @@ function PhysicalCards({
                   Issued {formatDate(card.issuedAt)} · expires {formatMonth(card.expiresAt)}
                 </Text>
               </Stack>
-              {card.balance && (
-                <Group gap="xs">
-                  <Text size="sm">{formatMoney(card.balance.reportedCents)}</Text>
-                  <GapBadge cents={card.balance.gapCents} />
-                </Group>
-              )}
+              <Group gap="xs">
+                <Text size="sm">{formatMoney(card.reported.cents)}</Text>
+                {card.balance && <GapBadge cents={card.balance.gapCents} />}
+              </Group>
             </Group>
             <OpeningBalance accountId={accountId} card={card} readOnly={readOnly} />
             {members.length > 1 && (

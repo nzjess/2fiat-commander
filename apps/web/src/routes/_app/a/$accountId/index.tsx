@@ -4,7 +4,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { api, type Card, type LogicalCard, ok } from "../../../../api.ts";
 import { CardFace } from "../../../../components/CardFace.tsx";
 import { AnchorLink } from "../../../../components/links.tsx";
-import { GapBadge, TransientBadge } from "../../../../components/status.tsx";
+import { GapBadge, MissingBadge, TransientBadge } from "../../../../components/status.tsx";
 import { formatMoney } from "../../../../lib/format.ts";
 import { accountQuery, cardsQuery, findingsQuery, logicalCardsQuery } from "../../../../queries.ts";
 
@@ -111,12 +111,13 @@ function LogicalCardPanel({
           params={params}
           style={{ color: "inherit", textDecoration: "none" }}
         >
-          <CardFace card={current} balanceCents={balance?.reportedCents} />
+          <CardFace card={current} balanceCents={logical.reportedCents} />
         </Link>
         <Group gap="xs">
           <AnchorLink to="/a/$accountId/cards/$logicalCardId" params={params} fw={700} size="lg" c="inherit">
             {logical.name}
           </AnchorLink>
+          {current.missingSince && <MissingBadge since={current.missingSince} />}
           {findings > 0 && (
             <AnchorLink to="/a/$accountId/findings" params={{ accountId }} search={{ card: logical.id }}>
               <Badge color="orange" variant="light" style={{ cursor: "pointer" }}>
@@ -136,7 +137,7 @@ function LogicalCardPanel({
           </Group>
         ) : (
           <Text size="sm" c="dimmed">
-            Not evaluated yet.
+            Not synced yet.
           </Text>
         )}
       </Stack>

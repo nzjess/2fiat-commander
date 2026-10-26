@@ -1,5 +1,5 @@
 import type { RawCardDetails, RawOrder, RawTransaction } from "@twofiat/client";
-import { and, eq, gte, inArray, isNotNull, lt, max } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull, lt, lte, max, notInArray } from "drizzle-orm";
 import { chunks, type Db, type Executor, IMMEDIATE } from "./db/db.ts";
 import {
   accounts,
@@ -31,7 +31,7 @@ export interface PullPlan {
   /** Where the transaction window starts, if the account has been pulled before. */
   transactionsFrom: string | undefined;
   ordersFrom: string | undefined;
-  /** The 2fiat ids of the cards already stored. */
+  /** The 2fiat ids of the cards an earlier sync has pulled the rows of. */
   knownCards: Set<string>;
 }
 
@@ -41,23 +41,27 @@ export interface PullPlan {
  * stored: an order is paid within hours or never (its invoice times out), so only recent ones can still change.
  */
 export function planPull(db: Db, accountId: number, overlapDays: number): PullPlan {
-  const lastWindow = db
-    .select({ to: max(syncs.windowTo) })
+  const last = db
+    .select({ to: max(syncs.windowTo), ingestedAt: max(syncs.ingestedAt) })
     .from(syncs)
     .where(and(eq(syncs.accountId, accountId), isNotNull(syncs.ingestedAt)))
-    .get()?.to;
+    .get();
+  const lastWindow = last?.to;
   const newestOrder = db
     .select({ at: max(rawOrders.createdAt) })
     .from(rawOrders)
     .where(eq(rawOrders.accountId, accountId))
     .get()?.at;
+  // Cards an earlier sync pulled: those stored when the account was added, before any sync, still need their history.
   const knownCards = new Set(
-    db
-      .select({ twofiatId: cards.twofiatId })
-      .from(cards)
-      .where(eq(cards.accountId, accountId))
-      .all()
-      .map((c) => c.twofiatId),
+    last?.ingestedAt
+      ? db
+          .select({ twofiatId: cards.twofiatId })
+          .from(cards)
+          .where(and(eq(cards.accountId, accountId), lte(cards.firstSeenAt, last.ingestedAt)))
+          .all()
+          .map((c) => c.twofiatId)
+      : [],
   );
   return {
     transactionsFrom: lastWindow ? addDays(lastWindow, -overlapDays) : undefined,
@@ -155,6 +159,19 @@ export function ingest(db: Db, accountId: number, syncId: number, pull: Pull): I
         .run();
     }
 
+    // Cards 2fiat lists are present; any other is missing from this sync on, until it's listed again.
+    const listed = [...pull.balances.keys()];
+    q.update(cards)
+      .set({ missingSince: null })
+      .where(and(eq(cards.accountId, accountId), inArray(cards.twofiatId, listed)))
+      .run();
+    q.update(cards)
+      .set({ missingSince: pull.observedAt })
+      .where(
+        and(eq(cards.accountId, accountId), notInArray(cards.twofiatId, listed), isNull(cards.missingSince)),
+      )
+      .run();
+
     const dirtyFrom = [tx.dirtyFrom, orders.dirtyFrom].filter((t) => t !== undefined).sort()[0];
     if (dirtyFrom !== undefined) {
       const current = q
@@ -189,7 +206,8 @@ export function ingest(db: Db, accountId: number, syncId: number, pull: Pull): I
   }, IMMEDIATE);
 }
 
-function upsertCards(q: Executor, accountId: number, details: RawCardDetails[], now: string): number {
+/** Stores cards, creating a logical card (with the card as its current one) for each new one. Returns how many are new. */
+export function upsertCards(q: Executor, accountId: number, details: RawCardDetails[], now: string): number {
   let created = 0;
   for (const raw of details) {
     const values = {

@@ -121,6 +121,11 @@ export const cards = sqliteTable(
     issuedAt: text("issued_at"),
     expiresAt: text("expires_at"),
     raw: text({ mode: "json" }).$type<RawCard | RawCardDetails>().notNull(),
+    /**
+     * When a sync's card list first left this card out (e.g. 2fiat cancelled it, or a hiccup); null while 2fiat lists
+     * it. Cleared when it's listed again.
+     */
+    missingSince: text("missing_since"),
     firstSeenAt: text("first_seen_at")
       .notNull()
       .$defaultFn(() => now()),

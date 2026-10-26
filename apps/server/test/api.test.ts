@@ -195,6 +195,46 @@ describe("accounts", () => {
     expect(await ok(c.api.accounts.$get())).toHaveLength(1);
   });
 
+  test("adding an account stores its cards and 2fiat's balances, and the first sync still pulls their history", async () => {
+    const s = await setup();
+    const c = await loggedIn(s);
+    const created = await ok(c.api.accounts.$post({ json: { label: "main", token: TOKEN } }));
+    const param = { accountId: String(created.id) };
+    const account = c.api.accounts[":accountId"];
+
+    const cards = await ok(account.cards.$get({ param }));
+    expect(
+      cards.map((card) => [card.twofiatId, card.reported.cents, card.balance, card.missingSince]),
+    ).toEqual([
+      [CARD_A, 1250, null, null],
+      [CARD_B, 10000, null, null],
+    ]);
+    expect((await ok(account["logical-cards"].$get({ param }))).map((l) => l.reportedCents)).toEqual([
+      1250, 10000,
+    ]);
+    expect((await ok(account.activities.$get({ param, query: {} }))).items).toEqual([]);
+
+    // Stored before any sync, the cards are still new to it: their whole history comes down.
+    await s.runner.sync(created.id, "manual");
+    const kinds = (await ok(account.activities.$get({ param, query: {} }))).items.map((a) => a.kind);
+    expect(kinds).toContain("card_issue");
+    expect(kinds).toHaveLength(5);
+  });
+
+  test("an account is added even if its cards can't be fetched yet; they come with the first sync", async () => {
+    const s = await setup();
+    const c = await loggedIn(s);
+    const cards = s.twofiat.state.cards;
+    s.twofiat.state.cards = null as never;
+    const created = await ok(c.api.accounts.$post({ json: { label: "main", token: TOKEN } }));
+    const param = { accountId: String(created.id) };
+    expect(await ok(c.api.accounts[":accountId"].cards.$get({ param }))).toEqual([]);
+
+    s.twofiat.state.cards = cards;
+    await s.runner.sync(created.id, "manual");
+    expect(await ok(c.api.accounts[":accountId"].cards.$get({ param }))).toHaveLength(2);
+  });
+
   test("refuses malformed, rejected and duplicate tokens", async () => {
     const s = await setup();
     const c = await loggedIn(s);
@@ -856,5 +896,39 @@ describe("fee schedules", () => {
       },
     });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("missing cards", () => {
+  test("a card 2fiat stops listing is marked missing and raises a finding, until it's listed again", async () => {
+    const s = await synced();
+    const listed = s.twofiat.state.cards;
+    s.twofiat.state.cards = listed.filter((c) => c.id !== CARD_B);
+    s.clock.now = new Date("2026-10-21T12:00:00.000Z");
+    await s.runner.sync(s.accountId, "manual");
+
+    const b = (await s.cardsByTwofiatId()).get(CARD_B);
+    expect(b?.missingSince).toBe("2026-10-21T12:00:00.000Z");
+    expect(b?.reported.cents).toBe(10000);
+    const logical = await ok(s.account["logical-cards"].$get({ param: s.param }));
+    expect(logical.find((l) => l.id === b?.logicalCardId)?.reportedCents).toBe(0);
+    const missing = async () =>
+      (
+        await ok(s.account.findings.$get({ param: s.param, query: { status: "all", kind: "card-missing" } }))
+      ).map((f) => [f.cardId, f.cents, f.resolvedAt !== null]);
+    expect(await missing()).toEqual([[b?.id, -10000, false]]);
+    const message = (
+      await ok(s.account.findings.$get({ param: s.param, query: { kind: "card-missing" } }))
+    )[0]?.message;
+    expect(message).toBe(
+      "2fiat no longer lists this card, since 21 October 2026. Its last reported balance was $100.00.",
+    );
+
+    // Back again: no longer missing, and the finding resolves.
+    s.twofiat.state.cards = listed;
+    s.clock.now = new Date("2026-10-22T12:00:00.000Z");
+    await s.runner.sync(s.accountId, "manual");
+    expect((await s.cardsByTwofiatId()).get(CARD_B)?.missingSince).toBeNull();
+    expect(await missing()).toEqual([[b?.id, -10000, true]]);
   });
 });

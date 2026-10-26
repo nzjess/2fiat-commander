@@ -8,10 +8,10 @@ import {
 } from "@twofiat/client";
 import { eq } from "drizzle-orm";
 import { AccountArchivedError, SID_TTL_MS } from "./accounts.ts";
-import type { Db } from "./db/db.ts";
+import { type Db, IMMEDIATE } from "./db/db.ts";
 import { accounts, type SyncStage, syncs } from "./db/schema.ts";
 import { type EvaluateResult, evaluate } from "./evaluate.ts";
-import { ingest, type Pull, planPull, windowStart } from "./ingest.ts";
+import { ingest, type Pull, planPull, upsertCards, windowStart } from "./ingest.ts";
 import { normalizeAccount } from "./ledger.ts";
 import type { Secrets } from "./secrets.ts";
 import { utcDay } from "./time.ts";
@@ -157,6 +157,20 @@ export class SyncRunner {
     }
     const sync = db.select().from(syncs).where(eq(syncs.id, syncId)).get() as SyncRow;
     return { sync, evaluation };
+  }
+
+  /**
+   * Fetches an account's cards and stores them, with no rows and no balance observations: e.g. when it's added, so
+   * its cards show (with 2fiat's balances) before the first sync. Read-only towards 2fiat. Returns the new cards.
+   */
+  async pullCards(accountId: number): Promise<number> {
+    const client = new TwoFiatClient(this.#openSession(accountId));
+    const details: RawCardDetails[] = [];
+    for (const card of await client.listCards()) details.push(await client.getCardDetails(card.id));
+    return this.#db.transaction(
+      (q) => upsertCards(q, accountId, details, this.#now().toISOString()),
+      IMMEDIATE,
+    );
   }
 
   /**

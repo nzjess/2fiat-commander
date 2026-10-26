@@ -1,10 +1,11 @@
-import type { CardReconciliation, FindingKind } from "@twofiat/client";
-import { and, eq, isNull } from "drizzle-orm";
+import { type CardReconciliation, dollarsToCents, type FindingKind } from "@twofiat/client";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { type Db, type Executor, IMMEDIATE } from "./db/db.ts";
-import { activities, cards, findings } from "./db/schema.ts";
+import { activities, balanceObservations, cards, findings } from "./db/schema.ts";
 
 /** Kinds about the card as a whole: one per card, whatever the amount or the activities involved. */
 const CARD_LEVEL = new Set<FindingKind>([
+  "card-missing",
   "balance-gap",
   "history-incomplete",
   "fees-above-advertised",
@@ -122,6 +123,77 @@ export function recordFindingsIn(
       if (seen.has(f.fingerprint)) continue;
       q.update(findings).set({ resolvedEvaluationId: evaluationId }).where(eq(findings.id, f.id)).run();
       result.resolved++;
+    }
+  }
+  return result;
+}
+
+/**
+ * Records a `card-missing` finding for each of the account's cards that 2fiat's latest card list left out, and
+ * resolves it for a card listed again. A missing card isn't reconciled, so its other findings are left as they were.
+ */
+export function recordMissingCardsIn(
+  q: Executor,
+  accountId: number,
+  evaluationId: number,
+): RecordFindingsResult {
+  const result = { opened: 0, continued: 0, resolved: 0 };
+  for (const card of q.select().from(cards).where(eq(cards.accountId, accountId)).all()) {
+    const existing = q
+      .select()
+      .from(findings)
+      .where(and(eq(findings.cardId, card.id), eq(findings.fingerprint, "card-missing")))
+      .get();
+    if (card.missingSince === null) {
+      if (existing && existing.resolvedEvaluationId === null) {
+        q.update(findings)
+          .set({ resolvedEvaluationId: evaluationId })
+          .where(eq(findings.id, existing.id))
+          .run();
+        result.resolved++;
+      }
+      continue;
+    }
+
+    // The money at stake: what 2fiat last said the card held.
+    const lastCents =
+      q
+        .select({ cents: balanceObservations.reportedCents })
+        .from(balanceObservations)
+        .where(eq(balanceObservations.cardId, card.id))
+        .orderBy(desc(balanceObservations.syncId))
+        .limit(1)
+        .get()?.cents ?? dollarsToCents(card.raw.balance);
+    const since = new Date(card.missingSince).toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+    const values = {
+      cents: -lastCents,
+      message: `2fiat no longer lists this card, since ${since}. Its last reported balance was $${(lastCents / 100).toFixed(2)}.`,
+      activityIds: [],
+      lastSeenEvaluationId: evaluationId,
+    };
+    if (existing) {
+      q.update(findings)
+        .set({ ...values, resolvedEvaluationId: null })
+        .where(eq(findings.id, existing.id))
+        .run();
+      if (existing.resolvedEvaluationId === null) result.continued++;
+      else result.opened++;
+    } else {
+      q.insert(findings)
+        .values({
+          ...values,
+          cardId: card.id,
+          kind: "card-missing",
+          fingerprint: "card-missing",
+          firstSeenEvaluationId: evaluationId,
+        })
+        .run();
+      result.opened++;
     }
   }
   return result;

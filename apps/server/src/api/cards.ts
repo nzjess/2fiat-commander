@@ -1,10 +1,18 @@
 import { zValidator } from "@hono/zod-validator";
+import { dollarsToCents } from "@twofiat/client";
 import { and, asc, eq, gte, inArray, notExists, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { balanceHistory } from "../balanceHistory.ts";
 import type { Db, Executor } from "../db/db.ts";
-import { balanceSnapshots, cards, evaluations, logicalCards, openingBalances } from "../db/schema.ts";
+import {
+  balanceObservations,
+  balanceSnapshots,
+  cards,
+  evaluations,
+  logicalCards,
+  openingBalances,
+} from "../db/schema.ts";
 import { reevaluate } from "../reevaluate.ts";
 import { spending } from "../spending.ts";
 import { type AccountEnv, ApiError, type AppDeps, idParam, invalid, notFound } from "./common.ts";
@@ -68,9 +76,35 @@ function snapshotDto(r: { snapshot: typeof balanceSnapshots.$inferSelect; asOf: 
   };
 }
 
+/** Each card's latest reported balance from a sync, with when it was observed. */
+function latestObservations(db: Db, cardIds: number[]) {
+  if (cardIds.length === 0) return new Map<number, { cents: number; asOf: string }>();
+  return new Map(
+    db
+      .select({
+        cardId: balanceObservations.cardId,
+        cents: balanceObservations.reportedCents,
+        asOf: balanceObservations.observedAt,
+      })
+      .from(balanceObservations)
+      .where(
+        and(
+          inArray(balanceObservations.cardId, cardIds),
+          eq(
+            balanceObservations.syncId,
+            sql`(SELECT max(o2.sync_id) FROM balance_observations o2 WHERE o2.card_id = ${balanceObservations.cardId})`,
+          ),
+        ),
+      )
+      .all()
+      .map((o) => [o.cardId, { cents: o.cents, asOf: o.asOf }]),
+  );
+}
+
 function cardDtos(db: Db, rows: CardRow[]) {
   const ids = rows.map((c) => c.id);
   const balances = latestSnapshots(db, ids);
+  const observed = latestObservations(db, ids);
   const openings = new Map(
     ids.length === 0
       ? []
@@ -94,6 +128,13 @@ function cardDtos(db: Db, rows: CardRow[]) {
     issuedAt: c.issuedAt,
     expiresAt: c.expiresAt,
     firstSeenAt: c.firstSeenAt,
+    /**
+     * What 2fiat last reported the card holds, which is what it holds: from the latest sync, or before the first
+     * one, from the card's details as fetched when the account was added.
+     */
+    reported: observed.get(c.id) ?? { cents: dollarsToCents(c.raw.balance), asOf: c.updatedAt },
+    /** When 2fiat's card list first left the card out; null while it's listed. */
+    missingSince: c.missingSince,
     /** As of the latest evaluation that saw the card; null before its first. */
     balance: balances.get(c.id) ?? null,
     openingBalance: openings.get(c.id) ?? null,
@@ -135,6 +176,10 @@ function logicalCardDtos(db: Db, accountId: number) {
         createdAt: l.createdAt,
         cardIds: own.map((c) => c.id),
         currentCardId: own.find((c) => c.isCurrent)?.id ?? null,
+        /** What 2fiat reports its listed physical cards hold, summed; a missing card's last balance isn't counted. */
+        reportedCents: own
+          .filter((c) => c.missingSince === null)
+          .reduce((total, c) => total + c.reported.cents, 0),
         /** The sum over its physical cards' latest balances; null while none has one. */
         balance:
           known.length === 0

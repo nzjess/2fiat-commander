@@ -29,7 +29,12 @@ export type FindingKind =
   /** A top-up charged a fee other than the accepted schedule's rate: more or less. */
   | "topup-fee-off-schedule"
   /** A month whose transaction fees differ from what the accepted schedule comes to, either way. */
-  | "transaction-fees-off-schedule";
+  | "transaction-fees-off-schedule"
+  /**
+   * 2fiat no longer lists a card it listed before. `reconcile` never produces it, since it only sees listed cards:
+   * the app raises it from the cards a sync didn't list.
+   */
+  | "card-missing";
 
 export interface Finding {
   kind: FindingKind;

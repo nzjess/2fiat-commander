@@ -70,6 +70,21 @@ const getAccount = (db: Db, id: number) =>
   db.select().from(accounts).where(eq(accounts.id, id)).get() as AccountRow;
 
 /** `/accounts`: the user's accounts. */
+/**
+ * Stores a new account's cards so they show before its first sync. The account stands even if this fails: its cards
+ * then arrive with the first sync.
+ */
+async function pullCardsIfAble(deps: AppDeps, accountId: number): Promise<void> {
+  try {
+    await deps.runner.pullCards(accountId);
+  } catch (err) {
+    console.warn(
+      `account ${accountId}: couldn't fetch its cards yet:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+
 export function accountRoutes(deps: AppDeps) {
   const { db, secrets } = deps;
   const now = deps.now ?? (() => new Date());
@@ -94,6 +109,7 @@ export function accountRoutes(deps: AppDeps) {
         assertNewToken(db, secrets, userId, token);
         const sid = await verifyToken(token, { session: deps.session, now: now() });
         const id = createAccount(db, secrets, { userId, label, token, sid });
+        await pullCardsIfAble(deps, id);
         return c.json(accountDto(db, getAccount(db, id)), 201);
       })
   );
@@ -125,6 +141,7 @@ export function accountScopedRoutes(deps: AppDeps) {
           assertNewToken(db, secrets, account.userId, token);
           const sid = await verifyToken(token, { session: deps.session, now: now() });
           const id = replaceAccount(db, secrets, account.id, { label, token, sid, now: now() });
+          await pullCardsIfAble(deps, id);
           return c.json(accountDto(db, getAccount(db, id)), 201);
         },
       )

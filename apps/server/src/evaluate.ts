@@ -18,7 +18,7 @@ import {
   openingBalances,
   rawTransactions,
 } from "./db/schema.ts";
-import { type RecordFindingsResult, recordFindingsIn } from "./findings.ts";
+import { type RecordFindingsResult, recordFindingsIn, recordMissingCardsIn } from "./findings.ts";
 
 export class LedgerNotReadyError extends Error {
   constructor(accountId: number) {
@@ -104,7 +104,13 @@ export function evaluate(
         })
         .run();
     }
-    const findings = recordFindingsIn(q, accountId, evaluationId, reconciliations);
+    const reconciled = recordFindingsIn(q, accountId, evaluationId, reconciliations);
+    const missing = recordMissingCardsIn(q, accountId, evaluationId);
+    const findings = {
+      opened: reconciled.opened + missing.opened,
+      continued: reconciled.continued + missing.continued,
+      resolved: reconciled.resolved + missing.resolved,
+    };
     return { evaluationId, reconciliations, inferredOpenings, findings };
   }, IMMEDIATE);
 }

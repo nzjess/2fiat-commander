@@ -22,6 +22,7 @@ export function toCents(value: string | number): number | undefined {
 }
 
 export const FINDING_KIND_LABELS: Record<FindingKind, string> = {
+  "card-missing": "Card missing",
   "balance-gap": "Balance gap",
   "history-incomplete": "History incomplete",
   "credit-shortfall": "Credit shortfall",

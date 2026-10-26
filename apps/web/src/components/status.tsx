@@ -1,6 +1,6 @@
 import { Alert, Badge, Center, Loader, Stack, Text, Title, Tooltip } from "@mantine/core";
 import { ApiError } from "../api.ts";
-import { formatMoney } from "../lib/format.ts";
+import { formatDate, formatMoney } from "../lib/format.ts";
 import { AnchorLink } from "./links.tsx";
 
 export function PageLoader() {
@@ -53,6 +53,17 @@ export function TransientBadge() {
     <Tooltip label="The balance changed while syncing, so this gap may be a timing artefact">
       <Badge color="yellow" variant="light">
         Moving
+      </Badge>
+    </Tooltip>
+  );
+}
+
+/** A card 2fiat's card list left out at a sync, perhaps for good (e.g. cancelled), perhaps only that once. */
+export function MissingBadge({ since }: { since: string }) {
+  return (
+    <Tooltip label={`2fiat hasn't listed this card since ${formatDate(since)}`}>
+      <Badge color="red" variant="light">
+        Missing
       </Badge>
     </Tooltip>
   );
