@@ -2,6 +2,7 @@ import {
   Accordion,
   Badge,
   Button,
+  Divider,
   Group,
   Paper,
   Select,
@@ -91,7 +92,7 @@ function LogicalCardPage() {
   const readOnly = account.archivedAt !== null;
 
   return (
-    <Stack gap="lg">
+    <Stack gap="xl">
       <Group justify="flex-end">
         <CardSelect
           logicalCards={logicalCards}
@@ -213,9 +214,11 @@ function LogicalCardPage() {
   );
 }
 
+/** A titled part of the page, set off from the one above by a rule. */
 function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
     <Stack gap="xs">
+      <Divider mb="sm" />
       <Group justify="space-between">
         <Title order={4}>{title}</Title>
         {action}
