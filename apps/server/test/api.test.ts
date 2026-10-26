@@ -526,6 +526,11 @@ describe("activities", () => {
     expect(await query({ cardId: String(b?.id) })).toEqual(["CAFE SPRINGFIELD USA"]);
     expect(await query({ logicalCardId: String(b?.logicalCardId) })).toEqual(["CAFE SPRINGFIELD USA"]);
     expect((await activities.$get({ param: s.param, query: { cursor: "junk" } })).status).toBe(400);
+
+    const findings = await ok(s.account.findings.$get({ param: s.param, query: {} }));
+    const staleFinding = findings.find((f) => f.kind === "stale-authorization");
+    expect(await query({ findingId: String(staleFinding?.id) })).toEqual(["KIOSK SPRINGFIELD USA"]);
+    expect(await query({ findingId: "999" })).toEqual([]);
   });
 
   test("one activity comes with 2fiat's rows behind it and the findings that point at it", async () => {

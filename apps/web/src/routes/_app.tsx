@@ -87,6 +87,13 @@ function Nav({ accountId, onNavigate }: { accountId: string | undefined; onNavig
             onClick={onNavigate}
           />
           <NavItem
+            to="/a/$accountId/activity"
+            params={{ accountId }}
+            label="Activity"
+            active={!!matchRoute({ to: "/a/$accountId/activity", params: { accountId } })}
+            onClick={onNavigate}
+          />
+          <NavItem
             to="/a/$accountId/insights"
             params={{ accountId }}
             label="Insights"
@@ -138,13 +145,12 @@ function AccountSwitcher({ accountId }: { accountId: string | undefined }) {
       allowDeselect={false}
       onChange={(id) => {
         if (!id) return;
-        // Stay on the findings or insights page when switching, without its card filter: cards belong to one
-        // account. A card page has no counterpart in another account, so that goes to the overview.
-        const to = matchRoute({ to: "/a/$accountId/findings", fuzzy: true })
-          ? "/a/$accountId/findings"
-          : matchRoute({ to: "/a/$accountId/insights", fuzzy: true })
-            ? "/a/$accountId/insights"
-            : "/a/$accountId";
+        // Stay on the findings, insights or activity page when switching, without its filters: cards belong to
+        // one account. A card page has no counterpart in another account, so that goes to the overview.
+        const to =
+          (["/a/$accountId/findings", "/a/$accountId/insights", "/a/$accountId/activity"] as const).find(
+            (page) => matchRoute({ to: page, fuzzy: true }),
+          ) ?? "/a/$accountId";
         void navigate({ to, params: { accountId: id } });
       }}
     />

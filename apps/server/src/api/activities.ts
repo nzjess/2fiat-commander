@@ -67,6 +67,8 @@ function decodeCursor(cursor: string): [string, number] {
 const ListQuery = z.object({
   cardId: z.coerce.number().int().positive().optional(),
   logicalCardId: z.coerce.number().int().positive().optional(),
+  /** The activities a finding points at. */
+  findingId: z.coerce.number().int().positive().optional(),
   /** Comma-separated. */
   kind: z.string().transform(list).optional(),
   status: z.string().transform(list).optional(),
@@ -115,6 +117,10 @@ export function activityRoutes(deps: AppDeps) {
                       .from(cards)
                       .where(eq(cards.logicalCardId, query.logicalCardId)),
                   ),
+              // Activities are this account's, so another account's finding matches nothing.
+              query.findingId === undefined
+                ? undefined
+                : sql`${activities.id} IN (SELECT value FROM ${findings}, json_each(${findings.activityIds}) WHERE ${findings.id} = ${query.findingId})`,
               query.kind?.length ? inArray(activities.kind, query.kind as ActivityRow["kind"][]) : undefined,
               query.status?.length
                 ? inArray(activities.status, query.status as ActivityRow["status"][])

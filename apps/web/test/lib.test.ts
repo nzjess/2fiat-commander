@@ -6,10 +6,18 @@ import {
   formatMoney,
   isoToLocalDate,
   localDateToIso,
+  localDayStart,
   timeAgo,
   toCents,
 } from "../src/lib/format.ts";
-import { parseFindingsSearch, parseInsightsSearch, positiveInt, safeRedirect } from "../src/lib/search.ts";
+import {
+  activitiesParams,
+  parseActivitySearch,
+  parseFindingsSearch,
+  parseInsightsSearch,
+  positiveInt,
+  safeRedirect,
+} from "../src/lib/search.ts";
 
 describe("money", () => {
   test("formats cents as US dollars, in any locale", () => {
@@ -69,6 +77,17 @@ describe("dates", () => {
     expect(localDateToIso("2026-02-30")).toBeUndefined();
     expect(localDateToIso("2026-13-01")).toBeUndefined();
     expect(localDateToIso("")).toBeUndefined();
+    expect(localDayStart("2026-02-30")).toBeUndefined();
+  });
+
+  test("starts a local day, or a later one", () => {
+    const start = new Date(localDayStart("2026-10-26") ?? "");
+    expect([start.getFullYear(), start.getMonth(), start.getDate(), start.getHours()]).toEqual([
+      2026, 9, 26, 0,
+    ]);
+    // Across a month's end.
+    const next = new Date(localDayStart("2026-10-31", 1) ?? "");
+    expect([next.getMonth(), next.getDate(), next.getHours()]).toEqual([10, 1, 0]);
   });
 });
 
@@ -89,6 +108,67 @@ describe("search params", () => {
   test("keeps only a well-formed insights card", () => {
     expect(parseInsightsSearch({ card: "4" })).toEqual({ card: 4 });
     expect(parseInsightsSearch({ card: "x" })).toEqual({});
+  });
+
+  test("keeps only well-formed activity filters", () => {
+    expect(parseActivitySearch({})).toEqual({});
+    expect(
+      parseActivitySearch({
+        card: "2",
+        kind: "purchase,nope,fee,purchase",
+        status: "pending",
+        from: "2026-10-01",
+        to: "2026-02-30",
+        q: "  cafe ",
+        stale: true,
+        finding: 9,
+        activity: "41",
+      }),
+    ).toEqual({
+      card: 2,
+      kind: "purchase,fee",
+      status: "pending",
+      from: "2026-10-01",
+      q: "cafe",
+      stale: true,
+      finding: 9,
+      activity: 41,
+    });
+    // The router reads a numeric search as a number.
+    expect(parseActivitySearch({ q: 1234, kind: "nope", stale: false })).toEqual({ q: "1234" });
+    expect(parseActivitySearch({ q: "   ", status: 3 })).toEqual({});
+    // Only the offered page sizes, and the default stays out of the URL.
+    expect(parseActivitySearch({ size: "20" })).toEqual({ size: 20 });
+    expect(parseActivitySearch({ size: 10 })).toEqual({});
+    expect(parseActivitySearch({ size: 30 })).toEqual({});
+  });
+
+  test("turns activity filters into the server's query, with an exclusive end", () => {
+    // The default page size is sent too: the server's own differs.
+    expect(activitiesParams(5, {})).toEqual({ logicalCardId: "5", limit: "10" });
+    expect(
+      activitiesParams(5, {
+        kind: "fee",
+        status: "pending,settled",
+        from: "2026-10-01",
+        to: "2026-10-26",
+        q: "cafe",
+        stale: true,
+        finding: 9,
+        size: 100,
+        activity: 41,
+      }),
+    ).toEqual({
+      logicalCardId: "5",
+      kind: "fee",
+      status: "pending,settled",
+      from: localDayStart("2026-10-01"),
+      to: localDayStart("2026-10-27"),
+      q: "cafe",
+      stale: "true",
+      findingId: "9",
+      limit: "100",
+    });
   });
 
   test("reads positive integers", () => {

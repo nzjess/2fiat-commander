@@ -128,8 +128,19 @@ function FindingItem({
           {resolved
             ? `, resolved ${formatDate(finding.resolvedAt)}`
             : `, last seen ${formatDate(finding.lastSeenAt)}`}
-          {finding.activityIds.length > 0 &&
-            ` · ${finding.activityIds.length} ${finding.activityIds.length === 1 ? "activity" : "activities"}`}
+          {finding.activityIds.length > 0 && logical && (
+            <>
+              {" · "}
+              <AnchorLink
+                to="/a/$accountId/activity"
+                params={{ accountId }}
+                search={{ card: logical.id, finding: finding.id }}
+                size="xs"
+              >
+                {finding.activityIds.length} {finding.activityIds.length === 1 ? "activity" : "activities"}
+              </AnchorLink>
+            </>
+          )}
         </Text>
         <Explanation accountId={accountId} finding={finding} />
         {canAdjust && (

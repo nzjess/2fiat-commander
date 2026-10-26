@@ -15,6 +15,7 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { api, type Card, type LogicalCard, ok, send } from "../../../../../api.ts";
+import { ActivityTable } from "../../../../../components/ActivityTable.tsx";
 import { AdjustmentList } from "../../../../../components/Adjustments.tsx";
 import { CardFace } from "../../../../../components/CardFace.tsx";
 import { CardSelect } from "../../../../../components/CardPageHeader.tsx";
@@ -31,9 +32,10 @@ import {
   isActive,
   toCents,
 } from "../../../../../lib/format.ts";
-import { positiveInt } from "../../../../../lib/search.ts";
+import { activitiesParams, positiveInt } from "../../../../../lib/search.ts";
 import {
   accountQuery,
+  activitiesQuery,
   adjustmentsQuery,
   cardsQuery,
   findingsQuery,
@@ -56,10 +58,14 @@ export const Route = createFileRoute("/_app/a/$accountId/cards/$logicalCardId")(
       queryClient.ensureQueryData(findingsQuery(accountId, { card: id })),
       queryClient.ensureQueryData(adjustmentsQuery(accountId, id)),
       queryClient.ensureQueryData(spendingQuery(accountId, id)),
+      queryClient.ensureQueryData(recentQuery(accountId, id)),
     ]);
   },
   component: LogicalCardPage,
 });
+
+const recentQuery = (accountId: string, logicalCardId: number) =>
+  activitiesQuery(accountId, { ...activitiesParams(logicalCardId, {}), limit: "5" });
 
 function LogicalCardPage() {
   const { accountId, logicalCardId } = Route.useParams();
@@ -68,6 +74,7 @@ function LogicalCardPage() {
   const { data: cards } = useSuspenseQuery(cardsQuery(accountId));
   const { data: logicalCards } = useSuspenseQuery(logicalCardsQuery(accountId));
   const { data: findings } = useSuspenseQuery(findingsQuery(accountId, { card: id }));
+  const { data: recent } = useSuspenseQuery(recentQuery(accountId, id));
   const navigate = useNavigate();
   const logical = logicalCards.find((l) => l.id === id);
   // E.g. just after its last physical card moved into another logical card.
@@ -124,6 +131,34 @@ function LogicalCardPage() {
         }
       >
         <SpendingChart accountId={accountId} logicalCardId={id} />
+      </Section>
+
+      <Section
+        title="Recent activity"
+        action={
+          <AnchorLink to="/a/$accountId/activity" params={{ accountId }} search={{ card: id }} size="sm">
+            All activity
+          </AnchorLink>
+        }
+      >
+        {recent.items.length === 0 ? (
+          <Text c="dimmed" size="sm">
+            No activity yet.
+          </Text>
+        ) : (
+          <ActivityTable
+            activities={recent.items}
+            cards={cards}
+            logical={logical}
+            onOpen={(activity) =>
+              navigate({
+                to: "/a/$accountId/activity",
+                params: { accountId },
+                search: { card: id, activity },
+              })
+            }
+          />
+        )}
       </Section>
 
       <Section

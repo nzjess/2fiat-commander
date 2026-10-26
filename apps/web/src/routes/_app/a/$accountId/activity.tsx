@@ -1,0 +1,329 @@
+import {
+  Alert,
+  Button,
+  CloseButton,
+  Group,
+  MultiSelect,
+  Pill,
+  Select,
+  Stack,
+  Switch,
+  Text,
+  TextInput,
+} from "@mantine/core";
+import { useDebouncedCallback } from "@mantine/hooks";
+import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
+import type { Card, LogicalCard } from "../../../../api.ts";
+import { ActivityDrawer } from "../../../../components/ActivityDrawer.tsx";
+import { ActivityTable } from "../../../../components/ActivityTable.tsx";
+import { CardPageHeader } from "../../../../components/CardPageHeader.tsx";
+import { ErrorView } from "../../../../components/status.tsx";
+import { ACTIVITY_KIND_LABELS, ACTIVITY_STATUS_LABELS, FINDING_KIND_LABELS } from "../../../../lib/format.ts";
+import {
+  type ActivitySearch,
+  activitiesParams,
+  DEFAULT_PAGE_SIZE,
+  PAGE_SIZES,
+  type PageSize,
+  parseActivitySearch,
+} from "../../../../lib/search.ts";
+import { activitiesQuery, cardsQuery, findingsQuery, logicalCardsQuery } from "../../../../queries.ts";
+
+/** A logical card's ledger, a page at a time, with filters and each activity's details in a drawer. */
+export const Route = createFileRoute("/_app/a/$accountId/activity")({
+  validateSearch: parseActivitySearch,
+  // Opening an activity's details doesn't reload the list.
+  loaderDeps: ({ search: { activity: _, ...filters } }) => filters,
+  loader: async ({ context: { queryClient }, params: { accountId }, deps }) => {
+    const [logicalCards] = await Promise.all([
+      queryClient.ensureQueryData(logicalCardsQuery(accountId)),
+      queryClient.ensureQueryData(cardsQuery(accountId)),
+    ]);
+    const id = deps.card ?? logicalCards[0]?.id;
+    if (id === undefined || !logicalCards.some((l) => l.id === id)) return;
+    await queryClient.ensureQueryData(activitiesQuery(accountId, activitiesParams(id, deps)));
+  },
+  component: ActivityPage,
+});
+
+function ActivityPage() {
+  const { accountId } = Route.useParams();
+  const search = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const { data: logicalCards } = useSuspenseQuery(logicalCardsQuery(accountId));
+  const { data: cards } = useSuspenseQuery(cardsQuery(accountId));
+  const logical = logicalCards.find((l) => l.id === (search.card ?? logicalCards[0]?.id));
+  const { activity, ...filters } = search;
+  const params = logical && activitiesParams(logical.id, filters);
+  const update = (patch: Partial<ActivitySearch>) =>
+    navigate({ search: (prev) => ({ ...prev, ...patch, activity: undefined }) });
+
+  return (
+    <Stack>
+      <CardPageHeader
+        accountId={accountId}
+        title="Activity"
+        logicalCards={logicalCards}
+        selected={logical}
+        // A finding belongs to one card, so it doesn't carry over.
+        onSelect={(card) => update({ card, finding: undefined })}
+      />
+      {logical && params ? (
+        <>
+          <Filters search={search} logical={logical} accountId={accountId} update={update} />
+          <Pages
+            // A new filter, or page size, starts again from the first page.
+            key={JSON.stringify(params)}
+            accountId={accountId}
+            params={params}
+            cards={cards}
+            logical={logical}
+            selectedId={activity}
+            filtered={Object.keys(filters).some((k) => k !== "card" && k !== "size")}
+            pageSize={search.size ?? DEFAULT_PAGE_SIZE}
+            onPageSize={(size) => update({ size: size === DEFAULT_PAGE_SIZE ? undefined : size })}
+            onOpen={(id) => navigate({ search: (prev) => ({ ...prev, activity: id }) })}
+          />
+          <ActivityDrawer
+            accountId={accountId}
+            activityId={activity}
+            cards={cards}
+            logical={logical}
+            onClose={() => navigate({ search: (prev) => ({ ...prev, activity: undefined }) })}
+          />
+        </>
+      ) : (
+        <Text c="dimmed">
+          {logicalCards.length === 0 ? "No cards yet: sync the account." : "No such card."}
+        </Text>
+      )}
+    </Stack>
+  );
+}
+
+function Filters({
+  accountId,
+  search,
+  logical,
+  update,
+}: {
+  accountId: string;
+  search: ActivitySearch;
+  logical: LogicalCard;
+  update: (patch: Partial<ActivitySearch>) => void;
+}) {
+  // Typing updates the URL once it pauses, so each keystroke doesn't refetch.
+  const [text, setText] = useState(search.q ?? "");
+  const updateText = useDebouncedCallback((q: string) => update({ q: q.trim() || undefined }), 300);
+  const split = (value: string | undefined) => (value ? value.split(",") : []);
+  const join = (values: string[]) => (values.length ? values.join(",") : undefined);
+
+  return (
+    <Stack gap="xs">
+      <Group gap="sm" align="flex-end">
+        <TextInput
+          size="xs"
+          w={220}
+          label="Search"
+          placeholder="Description"
+          value={text}
+          onChange={(e) => {
+            setText(e.currentTarget.value);
+            updateText(e.currentTarget.value);
+          }}
+          rightSection={
+            text && (
+              <CloseButton
+                size="sm"
+                aria-label="Clear the search"
+                onClick={() => {
+                  setText("");
+                  update({ q: undefined });
+                }}
+              />
+            )
+          }
+        />
+        <MultiSelect
+          size="xs"
+          w={240}
+          label="Kind"
+          placeholder={search.kind ? undefined : "All kinds"}
+          data={Object.entries(ACTIVITY_KIND_LABELS).map(([value, label]) => ({ value, label }))}
+          value={split(search.kind)}
+          onChange={(values) => update({ kind: join(values) })}
+          clearable
+        />
+        <MultiSelect
+          size="xs"
+          w={200}
+          label="Status"
+          placeholder={search.status ? undefined : "All statuses"}
+          data={Object.entries(ACTIVITY_STATUS_LABELS).map(([value, label]) => ({ value, label }))}
+          value={split(search.status)}
+          onChange={(values) => update({ status: join(values) })}
+          clearable
+        />
+        <TextInput
+          size="xs"
+          type="date"
+          label="From"
+          value={search.from ?? ""}
+          onChange={(e) => update({ from: e.currentTarget.value || undefined })}
+        />
+        <TextInput
+          size="xs"
+          type="date"
+          label="To"
+          value={search.to ?? ""}
+          onChange={(e) => update({ to: e.currentTarget.value || undefined })}
+        />
+        <Switch
+          size="xs"
+          mb={6}
+          label="Stale holds only"
+          checked={search.stale === true}
+          onChange={(e) => update({ stale: e.currentTarget.checked || undefined })}
+        />
+      </Group>
+      {search.finding !== undefined && (
+        <FindingFilter
+          accountId={accountId}
+          logical={logical}
+          findingId={search.finding}
+          onClear={() => update({ finding: undefined })}
+        />
+      )}
+    </Stack>
+  );
+}
+
+/** Shows which finding the list is narrowed to, and clears it. */
+function FindingFilter({
+  accountId,
+  logical,
+  findingId,
+  onClear,
+}: {
+  accountId: string;
+  logical: LogicalCard;
+  findingId: number;
+  onClear: () => void;
+}) {
+  const { data: findings } = useQuery(findingsQuery(accountId, { card: logical.id, status: "all" }));
+  const finding = findings?.find((f) => f.id === findingId);
+  return (
+    <Group gap="xs">
+      <Pill withRemoveButton onRemove={onClear} size="md">
+        Finding: {finding ? FINDING_KIND_LABELS[finding.kind] : `#${findingId}`}
+      </Pill>
+      {finding && (
+        <Text size="xs" c="dimmed" lineClamp={1} style={{ flex: 1 }}>
+          {finding.message}
+        </Text>
+      )}
+    </Group>
+  );
+}
+
+/**
+ * The list a page at a time. The server's cursor only goes forward, so the cursors seen so far are kept to go
+ * back; they start again whenever the filters change.
+ */
+function Pages({
+  accountId,
+  params,
+  cards,
+  logical,
+  selectedId,
+  filtered,
+  pageSize,
+  onPageSize,
+  onOpen,
+}: {
+  accountId: string;
+  params: Record<string, string>;
+  cards: Card[];
+  logical: LogicalCard;
+  selectedId: number | undefined;
+  filtered: boolean;
+  pageSize: PageSize;
+  onPageSize: (size: PageSize) => void;
+  onOpen: (activityId: number) => void;
+}) {
+  const [cursors, setCursors] = useState<string[]>([]);
+  // A new page starts at its top, not where the buttons left the last one.
+  const turn = (to: string[]) => {
+    setCursors(to);
+    window.scrollTo({ top: 0 });
+  };
+  const { data, error, isPlaceholderData } = useQuery({
+    ...activitiesQuery(accountId, params, cursors.at(-1)),
+    placeholderData: keepPreviousData,
+  });
+  if (error) return <ErrorView error={error} />;
+  if (!data) return null;
+  if (data.items.length === 0 && cursors.length === 0) {
+    return (
+      <Alert variant="light" color="gray">
+        {filtered ? "No activity matches these filters." : "No activity yet."}
+      </Alert>
+    );
+  }
+  const next = data.nextCursor;
+  return (
+    <Stack gap="xs" style={{ opacity: isPlaceholderData ? 0.6 : 1 }}>
+      <ActivityTable
+        activities={data.items}
+        cards={cards}
+        logical={logical}
+        selectedId={selectedId}
+        onOpen={onOpen}
+      />
+      <Group justify="space-between">
+        <Group gap="sm">
+          <Text size="sm" c="dimmed">
+            Page {cursors.length + 1}
+          </Text>
+          <Select
+            size="xs"
+            w={80}
+            aria-label="Rows per page"
+            data={PAGE_SIZES.map(String)}
+            value={String(pageSize)}
+            allowDeselect={false}
+            onChange={(value) => {
+              const size = PAGE_SIZES.find((n) => String(n) === value);
+              if (size) onPageSize(size);
+            }}
+          />
+          <Text size="sm" c="dimmed">
+            per page
+          </Text>
+        </Group>
+        {(cursors.length > 0 || next) && (
+          <Group gap="xs">
+            <Button
+              size="xs"
+              variant="default"
+              disabled={cursors.length === 0 || isPlaceholderData}
+              onClick={() => turn(cursors.slice(0, -1))}
+            >
+              Previous
+            </Button>
+            <Button
+              size="xs"
+              variant="default"
+              disabled={!next || isPlaceholderData}
+              onClick={() => next && turn([...cursors, next])}
+            >
+              Next
+            </Button>
+          </Group>
+        )}
+      </Group>
+    </Stack>
+  );
+}

@@ -47,6 +47,14 @@ export const balanceHistoryQuery = (accountId: string, logicalCardId: number) =>
       ),
   });
 
+/** A page of activities, newest first: `params` from `activitiesParams`, and the previous page's `nextCursor`. */
+export const activitiesQuery = (accountId: string, params: Record<string, string>, cursor?: string) =>
+  queryOptions({
+    queryKey: ["accounts", accountId, "activities", "list", params, cursor ?? null],
+    queryFn: () =>
+      ok(account.activities.$get({ param: { accountId }, query: { ...params, ...(cursor && { cursor }) } })),
+  });
+
 export const activityQuery = (accountId: string, activityId: number) =>
   queryOptions({
     queryKey: ["accounts", accountId, "activities", activityId],
