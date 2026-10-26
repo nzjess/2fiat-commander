@@ -7,10 +7,10 @@ import {
   activities,
   activitySources,
   cards,
+  evaluations,
   logicalCards,
   rawOrders,
   rawTransactions,
-  syncs,
   users,
 } from "../src/db/schema.ts";
 
@@ -127,10 +127,10 @@ export function setup() {
           .sort(),
       }));
 
-  const addSync = () =>
-    db.insert(syncs).values({ accountId, trigger: "manual", status: "running" }).returning().get().id;
+  const addEvaluation = () =>
+    db.insert(evaluations).values({ accountId, asOf: new Date().toISOString() }).returning().get().id;
 
-  return { db, userId, accountId, addAccount, addCard, cardId, addRows, seedActivity, ledger, addSync };
+  return { db, userId, accountId, addAccount, addCard, cardId, addRows, seedActivity, ledger, addEvaluation };
 }
 
 type RawRow = typeof rawTransactions.$inferSelect;

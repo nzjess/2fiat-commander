@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "00deeca2-a68e-4d5f-9504-e6af6818b053",
+  "id": "89a9fd84-536c-4240-99d1-7e8ed02258a5",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "accounts": {
@@ -51,6 +51,13 @@
         },
         "sid_expires_at": {
           "name": "sid_expires_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ledger_dirty_from": {
+          "name": "ledger_dirty_from",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -442,8 +449,8 @@
         }
       }
     },
-    "balance_snapshots": {
-      "name": "balance_snapshots",
+    "balance_observations": {
+      "name": "balance_observations",
       "columns": {
         "card_id": {
           "name": "card_id",
@@ -454,6 +461,82 @@
         },
         "sync_id": {
           "name": "sync_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reported_cents": {
+          "name": "reported_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "observed_at": {
+          "name": "observed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "transient": {
+          "name": "transient",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "balance_observations_card_id_cards_id_fk": {
+          "name": "balance_observations_card_id_cards_id_fk",
+          "tableFrom": "balance_observations",
+          "tableTo": "cards",
+          "columnsFrom": ["card_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "balance_observations_sync_id_syncs_id_fk": {
+          "name": "balance_observations_sync_id_syncs_id_fk",
+          "tableFrom": "balance_observations",
+          "tableTo": "syncs",
+          "columnsFrom": ["sync_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "balance_observations_card_id_sync_id_pk": {
+          "columns": ["card_id", "sync_id"],
+          "name": "balance_observations_card_id_sync_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "balance_snapshots": {
+      "name": "balance_snapshots",
+      "columns": {
+        "card_id": {
+          "name": "card_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "evaluation_id": {
+          "name": "evaluation_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "observed_sync_id": {
+          "name": "observed_sync_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
@@ -487,9 +570,9 @@
           "notNull": true,
           "autoincrement": false
         },
-        "taken_at": {
-          "name": "taken_at",
-          "type": "text",
+        "transient": {
+          "name": "transient",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -506,20 +589,29 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "balance_snapshots_sync_id_syncs_id_fk": {
-          "name": "balance_snapshots_sync_id_syncs_id_fk",
+        "balance_snapshots_evaluation_id_evaluations_id_fk": {
+          "name": "balance_snapshots_evaluation_id_evaluations_id_fk",
+          "tableFrom": "balance_snapshots",
+          "tableTo": "evaluations",
+          "columnsFrom": ["evaluation_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "balance_snapshots_observed_sync_id_syncs_id_fk": {
+          "name": "balance_snapshots_observed_sync_id_syncs_id_fk",
           "tableFrom": "balance_snapshots",
           "tableTo": "syncs",
-          "columnsFrom": ["sync_id"],
+          "columnsFrom": ["observed_sync_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
-        "balance_snapshots_card_id_sync_id_pk": {
-          "columns": ["card_id", "sync_id"],
-          "name": "balance_snapshots_card_id_sync_id_pk"
+        "balance_snapshots_card_id_evaluation_id_pk": {
+          "columns": ["card_id", "evaluation_id"],
+          "name": "balance_snapshots_card_id_evaluation_id_pk"
         }
       },
       "uniqueConstraints": {},
@@ -724,6 +816,76 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "evaluations": {
+      "name": "evaluations",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sync_id": {
+          "name": "sync_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "as_of": {
+          "name": "as_of",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "evaluations_account": {
+          "name": "evaluations_account",
+          "columns": ["account_id", "id"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "evaluations_account_id_accounts_id_fk": {
+          "name": "evaluations_account_id_accounts_id_fk",
+          "tableFrom": "evaluations",
+          "tableTo": "accounts",
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "evaluations_sync_id_syncs_id_fk": {
+          "name": "evaluations_sync_id_syncs_id_fk",
+          "tableFrom": "evaluations",
+          "tableTo": "syncs",
+          "columnsFrom": ["sync_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "findings": {
       "name": "findings",
       "columns": {
@@ -776,22 +938,22 @@
           "notNull": true,
           "autoincrement": false
         },
-        "first_seen_sync_id": {
-          "name": "first_seen_sync_id",
+        "first_seen_evaluation_id": {
+          "name": "first_seen_evaluation_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "last_seen_sync_id": {
-          "name": "last_seen_sync_id",
+        "last_seen_evaluation_id": {
+          "name": "last_seen_evaluation_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "resolved_sync_id": {
-          "name": "resolved_sync_id",
+        "resolved_evaluation_id": {
+          "name": "resolved_evaluation_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
@@ -829,29 +991,29 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "findings_first_seen_sync_id_syncs_id_fk": {
-          "name": "findings_first_seen_sync_id_syncs_id_fk",
+        "findings_first_seen_evaluation_id_evaluations_id_fk": {
+          "name": "findings_first_seen_evaluation_id_evaluations_id_fk",
           "tableFrom": "findings",
-          "tableTo": "syncs",
-          "columnsFrom": ["first_seen_sync_id"],
+          "tableTo": "evaluations",
+          "columnsFrom": ["first_seen_evaluation_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "findings_last_seen_sync_id_syncs_id_fk": {
-          "name": "findings_last_seen_sync_id_syncs_id_fk",
+        "findings_last_seen_evaluation_id_evaluations_id_fk": {
+          "name": "findings_last_seen_evaluation_id_evaluations_id_fk",
           "tableFrom": "findings",
-          "tableTo": "syncs",
-          "columnsFrom": ["last_seen_sync_id"],
+          "tableTo": "evaluations",
+          "columnsFrom": ["last_seen_evaluation_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "findings_resolved_sync_id_syncs_id_fk": {
-          "name": "findings_resolved_sync_id_syncs_id_fk",
+        "findings_resolved_evaluation_id_evaluations_id_fk": {
+          "name": "findings_resolved_evaluation_id_evaluations_id_fk",
           "tableFrom": "findings",
-          "tableTo": "syncs",
-          "columnsFrom": ["resolved_sync_id"],
+          "tableTo": "evaluations",
+          "columnsFrom": ["resolved_evaluation_id"],
           "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
@@ -946,8 +1108,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "set_by_sync_id": {
-          "name": "set_by_sync_id",
+        "set_by_evaluation_id": {
+          "name": "set_by_evaluation_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
@@ -965,11 +1127,11 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "opening_balances_set_by_sync_id_syncs_id_fk": {
-          "name": "opening_balances_set_by_sync_id_syncs_id_fk",
+        "opening_balances_set_by_evaluation_id_evaluations_id_fk": {
+          "name": "opening_balances_set_by_evaluation_id_evaluations_id_fk",
           "tableFrom": "opening_balances",
-          "tableTo": "syncs",
-          "columnsFrom": ["set_by_sync_id"],
+          "tableTo": "evaluations",
+          "columnsFrom": ["set_by_evaluation_id"],
           "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
@@ -1275,8 +1437,22 @@
           "notNull": true,
           "autoincrement": false
         },
+        "failed_stage": {
+          "name": "failed_stage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "error": {
           "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ingested_at": {
+          "name": "ingested_at",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -1298,6 +1474,14 @@
           "autoincrement": false,
           "default": 0
         },
+        "rows_missing": {
+          "name": "rows_missing",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
         "window_from": {
           "name": "window_from",
           "type": "text",
@@ -1307,6 +1491,13 @@
         },
         "window_to": {
           "name": "window_to",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "orders_from": {
+          "name": "orders_from",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -1325,6 +1516,12 @@
           "name": "syncs_account_started",
           "columns": ["account_id", "started_at"],
           "isUnique": false
+        },
+        "syncs_one_running": {
+          "name": "syncs_one_running",
+          "columns": ["account_id"],
+          "isUnique": true,
+          "where": "status = 'running'"
         }
       },
       "foreignKeys": {

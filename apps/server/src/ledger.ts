@@ -1,7 +1,8 @@
-import { type Activity, NORMALIZER_VERSION, normalize } from "@twofiat/client";
+import { type Activity, LOOKBACK_DAYS, NORMALIZER_VERSION, normalize } from "@twofiat/client";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { chunks, type Db, type Executor, IMMEDIATE } from "./db/db.ts";
 import {
+  accounts,
   activities,
   activityAnnotations,
   activitySources,
@@ -9,6 +10,7 @@ import {
   rawOrders,
   rawTransactions,
 } from "./db/schema.ts";
+import { daysBefore } from "./time.ts";
 
 export interface RenormalizeResult {
   /** Where the slice actually started, after widening it to whole activities. */
@@ -16,6 +18,30 @@ export interface RenormalizeResult {
   inserted: number;
   updated: number;
   deleted: number;
+}
+
+/**
+ * Brings an account's ledger up to date with its raw rows: re-normalises from `LOOKBACK_DAYS` before where ingest
+ * marked it dirty (everything after `markForRebuild`), then marks it clean, in one transaction. Returns undefined
+ * when the ledger was already up to date.
+ */
+export function normalizeAccount(db: Db, accountId: number): RenormalizeResult | undefined {
+  return db.transaction((q) => {
+    const dirtyFrom = q
+      .select({ dirtyFrom: accounts.ledgerDirtyFrom })
+      .from(accounts)
+      .where(eq(accounts.id, accountId))
+      .get()?.dirtyFrom;
+    if (dirtyFrom === null || dirtyFrom === undefined) return undefined;
+    const result = renormalizeIn(q, accountId, dirtyFrom && daysBefore(dirtyFrom, LOOKBACK_DAYS));
+    q.update(accounts).set({ ledgerDirtyFrom: null }).where(eq(accounts.id, accountId)).run();
+    return result;
+  }, IMMEDIATE);
+}
+
+/** Marks an account's whole ledger for rebuilding, e.g. after `NORMALIZER_VERSION` changes. */
+export function markForRebuild(db: Db, accountId: number): void {
+  db.update(accounts).set({ ledgerDirtyFrom: "" }).where(eq(accounts.id, accountId)).run();
 }
 
 /**
@@ -29,150 +55,153 @@ export interface RenormalizeResult {
  * over has merged into another one, and its annotation is merged into that one's.
  */
 export function renormalize(db: Db, accountId: number, from = ""): RenormalizeResult {
-  return db.transaction((q) => {
-    const sliceFrom = widenSlice(q, accountId, from);
+  return db.transaction((q) => renormalizeIn(q, accountId, from), IMMEDIATE);
+}
 
-    const cardRows = q.select().from(cards).where(eq(cards.accountId, accountId)).all();
-    const cardIds = new Map(cardRows.map((c) => [c.twofiatId, c.id]));
-    const txRows = q
-      .select({ id: rawTransactions.id, twofiatId: rawTransactions.twofiatId, raw: rawTransactions.raw })
-      .from(rawTransactions)
-      .where(and(eq(rawTransactions.accountId, accountId), gte(rawTransactions.createdAt, sliceFrom)))
-      .all();
-    const orderRows = q
-      .select({ id: rawOrders.id, twofiatId: rawOrders.twofiatId, raw: rawOrders.raw })
-      .from(rawOrders)
-      .where(and(eq(rawOrders.accountId, accountId), gte(rawOrders.createdAt, sliceFrom)))
-      .all();
+/** `renormalize` inside the caller's transaction. */
+export function renormalizeIn(q: Executor, accountId: number, from = ""): RenormalizeResult {
+  const sliceFrom = widenSlice(q, accountId, from);
 
-    const fresh = normalize({
-      transactions: txRows.map((r) => r.raw),
-      orders: orderRows.map((r) => r.raw),
-      cards: cardRows.map((c) => c.raw),
-    });
+  const cardRows = q.select().from(cards).where(eq(cards.accountId, accountId)).all();
+  const cardIds = new Map(cardRows.map((c) => [c.twofiatId, c.id]));
+  const txRows = q
+    .select({ id: rawTransactions.id, twofiatId: rawTransactions.twofiatId, raw: rawTransactions.raw })
+    .from(rawTransactions)
+    .where(and(eq(rawTransactions.accountId, accountId), gte(rawTransactions.createdAt, sliceFrom)))
+    .all();
+  const orderRows = q
+    .select({ id: rawOrders.id, twofiatId: rawOrders.twofiatId, raw: rawOrders.raw })
+    .from(rawOrders)
+    .where(and(eq(rawOrders.accountId, accountId), gte(rawOrders.createdAt, sliceFrom)))
+    .all();
 
-    // Sources are keyed "t<raw id>" or "o<raw id>" by our raw-row ids.
-    const txIds = new Map(txRows.map((r) => [r.twofiatId, r.id]));
-    const orderIds = new Map(orderRows.map((r) => [r.twofiatId, r.id]));
-    const sourcesOf = (a: Activity) => [
-      ...a.sources.transactionIds.map((id) => `t${txIds.get(id)}`),
-      ...a.sources.orderIds.map((id) => `o${orderIds.get(id)}`),
-    ];
+  const fresh = normalize({
+    transactions: txRows.map((r) => r.raw),
+    orders: orderRows.map((r) => r.raw),
+    cards: cardRows.map((c) => c.raw),
+  });
 
-    // After widening, these are all the sources of every old activity in the slice.
-    const oldSources = q.all<{ activity_id: number; source: string }>(sql`
-      SELECT s.activity_id, coalesce('t' || s.raw_transaction_id, 'o' || s.raw_order_id) AS source
-      FROM activity_sources s
-      LEFT JOIN raw_transactions t ON t.id = s.raw_transaction_id
-      LEFT JOIN raw_orders o ON o.id = s.raw_order_id
-      WHERE coalesce(t.account_id, o.account_id) = ${accountId}
-        AND coalesce(t.created_at, o.created_at) >= ${sliceFrom}`);
-    const oldBySource = new Map(oldSources.map((s) => [s.source, s.activity_id]));
-    const oldIds = [...new Set(oldSources.map((s) => s.activity_id))];
+  // Sources are keyed "t<raw id>" or "o<raw id>" by our raw-row ids.
+  const txIds = new Map(txRows.map((r) => [r.twofiatId, r.id]));
+  const orderIds = new Map(orderRows.map((r) => [r.twofiatId, r.id]));
+  const sourcesOf = (a: Activity) => [
+    ...a.sources.transactionIds.map((id) => `t${txIds.get(id)}`),
+    ...a.sources.orderIds.map((id) => `o${orderIds.get(id)}`),
+  ];
 
-    const overlaps: { index: number; oldId: number; shared: number }[] = [];
-    fresh.forEach((a, index) => {
-      const shared = new Map<number, number>();
-      for (const source of sourcesOf(a)) {
-        const oldId = oldBySource.get(source);
-        if (oldId !== undefined) shared.set(oldId, (shared.get(oldId) ?? 0) + 1);
-      }
-      for (const [oldId, n] of shared) overlaps.push({ index, oldId, shared: n });
-    });
+  // After widening, these are all the sources of every old activity in the slice.
+  const oldSources = q.all<{ activity_id: number; source: string }>(sql`
+    SELECT s.activity_id, coalesce('t' || s.raw_transaction_id, 'o' || s.raw_order_id) AS source
+    FROM activity_sources s
+    LEFT JOIN raw_transactions t ON t.id = s.raw_transaction_id
+    LEFT JOIN raw_orders o ON o.id = s.raw_order_id
+    WHERE coalesce(t.account_id, o.account_id) = ${accountId}
+      AND coalesce(t.created_at, o.created_at) >= ${sliceFrom}`);
+  const oldBySource = new Map(oldSources.map((s) => [s.source, s.activity_id]));
+  const oldIds = [...new Set(oldSources.map((s) => s.activity_id))];
 
-    // Oldest id first, then the new activity sharing the most rows with it.
-    overlaps.sort((x, y) => x.oldId - y.oldId || y.shared - x.shared || x.index - y.index);
-    const ids: (number | undefined)[] = fresh.map(() => undefined);
-    const kept = new Set<number>();
-    for (const o of overlaps) {
-      if (ids[o.index] === undefined && !kept.has(o.oldId)) {
-        ids[o.index] = o.oldId;
-        kept.add(o.oldId);
-      }
+  const overlaps: { index: number; oldId: number; shared: number }[] = [];
+  fresh.forEach((a, index) => {
+    const shared = new Map<number, number>();
+    for (const source of sourcesOf(a)) {
+      const oldId = oldBySource.get(source);
+      if (oldId !== undefined) shared.set(oldId, (shared.get(oldId) ?? 0) + 1);
     }
-    const dropped = oldIds.filter((id) => !kept.has(id));
-    // Each dropped activity's rows went mostly to one new activity: that's where its annotation goes.
-    const mergedInto = new Map<number, number>();
-    for (const o of [...overlaps].sort((x, y) => y.shared - x.shared || x.index - y.index)) {
-      if (!kept.has(o.oldId) && !mergedInto.has(o.oldId)) mergedInto.set(o.oldId, o.index);
-    }
+    for (const [oldId, n] of shared) overlaps.push({ index, oldId, shared: n });
+  });
 
-    const droppedNotes = [];
-    for (const chunk of chunks(dropped)) {
-      droppedNotes.push(
-        ...q.select().from(activityAnnotations).where(inArray(activityAnnotations.activityId, chunk)).all(),
-      );
+  // Oldest id first, then the new activity sharing the most rows with it.
+  overlaps.sort((x, y) => x.oldId - y.oldId || y.shared - x.shared || x.index - y.index);
+  const ids: (number | undefined)[] = fresh.map(() => undefined);
+  const kept = new Set<number>();
+  for (const o of overlaps) {
+    if (ids[o.index] === undefined && !kept.has(o.oldId)) {
+      ids[o.index] = o.oldId;
+      kept.add(o.oldId);
     }
-    for (const chunk of chunks(oldIds)) {
-      q.delete(activitySources).where(inArray(activitySources.activityId, chunk)).run();
-    }
-    for (const chunk of chunks(dropped)) q.delete(activities).where(inArray(activities.id, chunk)).run();
-    // Keys are unique per account and may move between kept activities, so clear them out of the way first.
-    for (const chunk of chunks([...kept])) {
-      q.update(activities)
-        .set({ key: sql`'~' || ${activities.id}` })
-        .where(inArray(activities.id, chunk))
-        .run();
-    }
+  }
+  const dropped = oldIds.filter((id) => !kept.has(id));
+  // Each dropped activity's rows went mostly to one new activity: that's where its annotation goes.
+  const mergedInto = new Map<number, number>();
+  for (const o of [...overlaps].sort((x, y) => y.shared - x.shared || x.index - y.index)) {
+    if (!kept.has(o.oldId) && !mergedInto.has(o.oldId)) mergedInto.set(o.oldId, o.index);
+  }
 
-    const cardId = (twofiatId: string) => {
-      const id = cardIds.get(twofiatId);
-      if (id === undefined) throw new Error(`No card ${twofiatId} in account ${accountId}`);
-      return id;
+  const droppedNotes = [];
+  for (const chunk of chunks(dropped)) {
+    droppedNotes.push(
+      ...q.select().from(activityAnnotations).where(inArray(activityAnnotations.activityId, chunk)).all(),
+    );
+  }
+  for (const chunk of chunks(oldIds)) {
+    q.delete(activitySources).where(inArray(activitySources.activityId, chunk)).run();
+  }
+  for (const chunk of chunks(dropped)) q.delete(activities).where(inArray(activities.id, chunk)).run();
+  // Keys are unique per account and may move between kept activities, so clear them out of the way first.
+  for (const chunk of chunks([...kept])) {
+    q.update(activities)
+      .set({ key: sql`'~' || ${activities.id}` })
+      .where(inArray(activities.id, chunk))
+      .run();
+  }
+
+  const cardId = (twofiatId: string) => {
+    const id = cardIds.get(twofiatId);
+    if (id === undefined) throw new Error(`No card ${twofiatId} in account ${accountId}`);
+    return id;
+  };
+  fresh.forEach((a, index) => {
+    const row = {
+      accountId,
+      cardId: cardId(a.cardId),
+      key: a.key,
+      kind: a.kind,
+      status: a.status,
+      amountCents: a.amountCents,
+      authorizedAmountCents: a.authorizedAmountCents ?? null,
+      attemptedAmountCents: a.attemptedAmountCents ?? null,
+      requestedAmountCents: a.requestedAmountCents ?? null,
+      feeCents: a.feeCents ?? null,
+      currency: a.currency,
+      occurredAt: a.occurredAt,
+      settledAt: a.settledAt ?? null,
+      description: a.description,
+      postedDescription: a.postedDescription ?? null,
+      orderTwofiatId: a.orderId ?? null,
+      transferId: a.transferId ?? null,
+      counterpartCardId:
+        a.counterpartCardId === undefined ? null : (cardIds.get(a.counterpartCardId) ?? null),
+      flags: a.flags,
+      normalizerVersion: NORMALIZER_VERSION,
     };
-    fresh.forEach((a, index) => {
-      const row = {
-        accountId,
-        cardId: cardId(a.cardId),
-        key: a.key,
-        kind: a.kind,
-        status: a.status,
-        amountCents: a.amountCents,
-        authorizedAmountCents: a.authorizedAmountCents ?? null,
-        attemptedAmountCents: a.attemptedAmountCents ?? null,
-        requestedAmountCents: a.requestedAmountCents ?? null,
-        feeCents: a.feeCents ?? null,
-        currency: a.currency,
-        occurredAt: a.occurredAt,
-        settledAt: a.settledAt ?? null,
-        description: a.description,
-        postedDescription: a.postedDescription ?? null,
-        orderTwofiatId: a.orderId ?? null,
-        transferId: a.transferId ?? null,
-        counterpartCardId:
-          a.counterpartCardId === undefined ? null : (cardIds.get(a.counterpartCardId) ?? null),
-        flags: a.flags,
-        normalizerVersion: NORMALIZER_VERSION,
-      };
-      let id = ids[index];
-      if (id === undefined) {
-        id = q.insert(activities).values(row).returning({ id: activities.id }).get().id;
-        ids[index] = id;
-      } else {
-        q.update(activities).set(row).where(eq(activities.id, id)).run();
-      }
-      const activityId = id;
-      q.insert(activitySources)
-        .values([
-          ...a.sources.transactionIds.map((t) => ({ activityId, rawTransactionId: txIds.get(t) })),
-          ...a.sources.orderIds.map((o) => ({ activityId, rawOrderId: orderIds.get(o) })),
-        ])
-        .run();
-    });
-
-    for (const note of droppedNotes) {
-      const index = mergedInto.get(note.activityId);
-      const into = index === undefined ? undefined : ids[index];
-      if (into !== undefined) mergeAnnotation(q, into, note);
+    let id = ids[index];
+    if (id === undefined) {
+      id = q.insert(activities).values(row).returning({ id: activities.id }).get().id;
+      ids[index] = id;
+    } else {
+      q.update(activities).set(row).where(eq(activities.id, id)).run();
     }
+    const activityId = id;
+    q.insert(activitySources)
+      .values([
+        ...a.sources.transactionIds.map((t) => ({ activityId, rawTransactionId: txIds.get(t) })),
+        ...a.sources.orderIds.map((o) => ({ activityId, rawOrderId: orderIds.get(o) })),
+      ])
+      .run();
+  });
 
-    return {
-      from: sliceFrom,
-      inserted: fresh.length - kept.size,
-      updated: kept.size,
-      deleted: dropped.length,
-    };
-  }, IMMEDIATE);
+  for (const note of droppedNotes) {
+    const index = mergedInto.get(note.activityId);
+    const into = index === undefined ? undefined : ids[index];
+    if (into !== undefined) mergeAnnotation(q, into, note);
+  }
+
+  return {
+    from: sliceFrom,
+    inserted: fresh.length - kept.size,
+    updated: kept.size,
+    deleted: dropped.length,
+  };
 }
 
 /** Moves `from` back until no activity has rows on both sides of it. */

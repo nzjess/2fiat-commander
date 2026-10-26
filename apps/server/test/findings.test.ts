@@ -21,7 +21,7 @@ describe("findingFingerprint", () => {
 });
 
 describe("recordFindings", () => {
-  test("tracks a finding's identity across syncs", () => {
+  test("tracks a finding's identity across evaluations", () => {
     const s = setup();
     const a = authorization({ at: "2026-10-01T00:00:00.000Z", amount: "-5.00" });
     s.addRows([a]);
@@ -41,13 +41,19 @@ describe("recordFindings", () => {
       message: "stale",
     };
     const record = (fs: Finding[]) =>
-      recordFindings(s.db, s.accountId, s.addSync(), [{ cardId: CARD_A, findings: fs }]);
+      recordFindings(s.db, s.accountId, s.addEvaluation(), [{ cardId: CARD_A, findings: fs }]);
     const rows = () =>
       s.db
         .select()
         .from(findings)
         .all()
-        .map((f) => [f.fingerprint, f.cents, f.firstSeenSyncId, f.lastSeenSyncId, f.resolvedSyncId]);
+        .map((f) => [
+          f.fingerprint,
+          f.cents,
+          f.firstSeenEvaluationId,
+          f.lastSeenEvaluationId,
+          f.resolvedEvaluationId,
+        ]);
 
     expect(record([gap(-1200), stale])).toEqual({ opened: 2, continued: 0, resolved: 0 });
     // The gap's amount changes but it stays the same finding; the stale authorisation is gone.
@@ -64,8 +70,8 @@ describe("recordFindings", () => {
   test("rejects a finding about an unknown activity", () => {
     const s = setup();
     const f: Finding = { kind: "credit-shortfall", activityKeys: ["topup:nope"], message: "" };
-    expect(() => recordFindings(s.db, s.accountId, s.addSync(), [{ cardId: CARD_A, findings: [f] }])).toThrow(
-      /unknown activity/,
-    );
+    expect(() =>
+      recordFindings(s.db, s.accountId, s.addEvaluation(), [{ cardId: CARD_A, findings: [f] }]),
+    ).toThrow(/unknown activity/);
   });
 });

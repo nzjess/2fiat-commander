@@ -1,6 +1,6 @@
 export { MAX_PAGE_SIZE, type OrderQuery, type TransactionQuery, TwoFiatClient } from "./client.ts";
 export { TwoFiatAuthError, TwoFiatError, TwoFiatSchemaError } from "./errors.ts";
-export { parseCents } from "./normalize/money.ts";
+export { dollarsToCents, parseCents } from "./normalize/money.ts";
 export { type NormalizeInput, normalize } from "./normalize/normalize.ts";
 export {
   type CardCosts,

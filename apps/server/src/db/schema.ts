@@ -18,6 +18,7 @@ import {
   sqliteTable,
   text,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 // Conventions: our own integer primary keys everywhere, 2fiat's ids in `twofiat_id` columns (unique per account).
@@ -65,6 +66,11 @@ export const accounts = sqliteTable(
     tokenHash: text("token_hash").notNull(),
     sidEnc: text("sid_enc"),
     sidExpiresAt: text("sid_expires_at"),
+    /**
+     * Raw rows from this time onwards may not be normalised yet: every raw row either belongs to an activity or is
+     * at or after it. Null when the ledger is up to date, "" when the whole ledger needs rebuilding.
+     */
+    ledgerDirtyFrom: text("ledger_dirty_from"),
     createdAt: createdAt(),
   },
   (t) => [unique("accounts_user_token").on(t.userId, t.tokenHash)],
@@ -256,6 +262,7 @@ export const activityAnnotations = sqliteTable(
   (t) => [index("activity_annotations_category").on(t.categoryId)],
 );
 
+/** One pull from 2fiat, and the normalisation and evaluation that follow it. */
 export const syncs = sqliteTable(
   "syncs",
   {
@@ -269,21 +276,35 @@ export const syncs = sqliteTable(
       .$defaultFn(() => now()),
     finishedAt: text("finished_at"),
     status: text().$type<"running" | "ok" | "failed">().notNull(),
+    /** Where a failed sync stopped. Raw rows are kept when only normalisation or evaluation failed. */
+    failedStage: text("failed_stage").$type<SyncStage>(),
     error: text(),
+    /** When the raw rows were written. */
+    ingestedAt: text("ingested_at"),
     rowsNew: integer("rows_new").notNull().default(0),
     rowsUpdated: integer("rows_updated").notNull().default(0),
+    /** Stored rows inside the fetched windows that 2fiat no longer returned. They're kept. */
+    rowsMissing: integer("rows_missing").notNull().default(0),
     /** The transaction window pulled from 2fiat (UTC days, inclusive). */
     windowFrom: text("window_from"),
     windowTo: text("window_to"),
-    /** Where re-normalisation started from. */
+    /** Orders were fetched back to this time; null when all were fetched. */
+    ordersFrom: text("orders_from"),
+    /** Where re-normalisation started from, when it ran. */
     normalizedFrom: text("normalized_from"),
   },
-  (t) => [index("syncs_account_started").on(t.accountId, t.startedAt)],
+  (t) => [
+    index("syncs_account_started").on(t.accountId, t.startedAt),
+    // One running sync per account, across processes too.
+    uniqueIndex("syncs_one_running").on(t.accountId).where(sql`status = 'running'`),
+  ],
 );
 
-/** Each card's reported and ledger balance at every sync, for charting when a gap appeared. */
-export const balanceSnapshots = sqliteTable(
-  "balance_snapshots",
+export type SyncStage = "fetch" | "ingest" | "normalize" | "evaluate";
+
+/** Each card's balance as 2fiat reported it at a sync: raw data, written with the raw rows. */
+export const balanceObservations = sqliteTable(
+  "balance_observations",
   {
     cardId: integer("card_id")
       .notNull()
@@ -292,12 +313,51 @@ export const balanceSnapshots = sqliteTable(
       .notNull()
       .references(() => syncs.id, { onDelete: "cascade" }),
     reportedCents: integer("reported_cents").notNull(),
+    observedAt: text("observed_at").notNull(),
+    /** The balance changed while the sync was fetching, so it may not match the rows fetched with it. */
+    transient: integer({ mode: "boolean" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.cardId, t.syncId] })],
+);
+
+/** One run of reconciliation over an account's ledger: after a sync, or on its own (e.g. an opening balance edit). */
+export const evaluations = sqliteTable(
+  "evaluations",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    accountId: integer("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    syncId: integer("sync_id").references(() => syncs.id, { onDelete: "set null" }),
+    /** "Now" for the reconciliation, e.g. for staleness. */
+    asOf: text("as_of").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("evaluations_account").on(t.accountId, t.id)],
+);
+
+/** Each card's reported and ledger balance at every evaluation, for charting when a gap appeared. */
+export const balanceSnapshots = sqliteTable(
+  "balance_snapshots",
+  {
+    cardId: integer("card_id")
+      .notNull()
+      .references(() => cards.id, { onDelete: "cascade" }),
+    evaluationId: integer("evaluation_id")
+      .notNull()
+      .references(() => evaluations.id, { onDelete: "cascade" }),
+    /** The sync whose balance observation this compares against. */
+    observedSyncId: integer("observed_sync_id")
+      .notNull()
+      .references(() => syncs.id, { onDelete: "cascade" }),
+    reportedCents: integer("reported_cents").notNull(),
     ledgerCents: integer("ledger_cents").notNull(),
     holdsCents: integer("holds_cents").notNull(),
     gapCents: integer("gap_cents").notNull(),
-    takenAt: text("taken_at").notNull(),
+    /** Copied from the observation: the gap may be an artefact of the balance moving mid-sync. */
+    transient: integer({ mode: "boolean" }).notNull(),
   },
-  (t) => [primaryKey({ columns: [t.cardId, t.syncId] })],
+  (t) => [primaryKey({ columns: [t.cardId, t.evaluationId] })],
 );
 
 /** A card's balance before its first visible row, for cards whose history starts mid-life. */
@@ -310,10 +370,12 @@ export const openingBalances = sqliteTable("opening_balances", {
   setAt: text("set_at")
     .notNull()
     .$defaultFn(() => now()),
-  setBySyncId: integer("set_by_sync_id").references(() => syncs.id, { onDelete: "set null" }),
+  setByEvaluationId: integer("set_by_evaluation_id").references(() => evaluations.id, {
+    onDelete: "set null",
+  }),
 });
 
-/** One row per finding identity, tracked across syncs: see `findings.ts`. */
+/** One row per finding identity, tracked across evaluations: see `findings.ts`. */
 export const findings = sqliteTable(
   "findings",
   {
@@ -323,18 +385,20 @@ export const findings = sqliteTable(
       .references(() => cards.id, { onDelete: "cascade" }),
     kind: text().$type<FindingKind>().notNull(),
     fingerprint: text().notNull(),
-    /** As of the last sync that saw it. */
+    /** As of the last evaluation that saw it. */
     cents: integer(),
     message: text().notNull(),
     activityIds: text("activity_ids", { mode: "json" }).$type<number[]>().notNull(),
-    firstSeenSyncId: integer("first_seen_sync_id")
+    firstSeenEvaluationId: integer("first_seen_evaluation_id")
       .notNull()
-      .references(() => syncs.id, { onDelete: "cascade" }),
-    lastSeenSyncId: integer("last_seen_sync_id")
+      .references(() => evaluations.id, { onDelete: "cascade" }),
+    lastSeenEvaluationId: integer("last_seen_evaluation_id")
       .notNull()
-      .references(() => syncs.id, { onDelete: "cascade" }),
-    /** The first sync that no longer saw it; cleared if it comes back. */
-    resolvedSyncId: integer("resolved_sync_id").references(() => syncs.id, { onDelete: "set null" }),
+      .references(() => evaluations.id, { onDelete: "cascade" }),
+    /** The first evaluation that no longer saw it; cleared if it comes back. */
+    resolvedEvaluationId: integer("resolved_evaluation_id").references(() => evaluations.id, {
+      onDelete: "set null",
+    }),
     explainedAt: text("explained_at"),
     explanation: text(),
   },

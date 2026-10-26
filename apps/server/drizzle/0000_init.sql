@@ -6,6 +6,7 @@ CREATE TABLE `accounts` (
 	`token_hash` text NOT NULL,
 	`sid_enc` text,
 	`sid_expires_at` text,
+	`ledger_dirty_from` text,
 	`created_at` text NOT NULL,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
 );
@@ -66,17 +67,30 @@ CREATE TABLE `activity_sources` (
 CREATE UNIQUE INDEX `activity_sources_raw_transaction_id_unique` ON `activity_sources` (`raw_transaction_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `activity_sources_raw_order_id_unique` ON `activity_sources` (`raw_order_id`);--> statement-breakpoint
 CREATE INDEX `activity_sources_activity` ON `activity_sources` (`activity_id`);--> statement-breakpoint
-CREATE TABLE `balance_snapshots` (
+CREATE TABLE `balance_observations` (
 	`card_id` integer NOT NULL,
 	`sync_id` integer NOT NULL,
+	`reported_cents` integer NOT NULL,
+	`observed_at` text NOT NULL,
+	`transient` integer NOT NULL,
+	PRIMARY KEY(`card_id`, `sync_id`),
+	FOREIGN KEY (`card_id`) REFERENCES `cards`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`sync_id`) REFERENCES `syncs`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE TABLE `balance_snapshots` (
+	`card_id` integer NOT NULL,
+	`evaluation_id` integer NOT NULL,
+	`observed_sync_id` integer NOT NULL,
 	`reported_cents` integer NOT NULL,
 	`ledger_cents` integer NOT NULL,
 	`holds_cents` integer NOT NULL,
 	`gap_cents` integer NOT NULL,
-	`taken_at` text NOT NULL,
-	PRIMARY KEY(`card_id`, `sync_id`),
+	`transient` integer NOT NULL,
+	PRIMARY KEY(`card_id`, `evaluation_id`),
 	FOREIGN KEY (`card_id`) REFERENCES `cards`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`sync_id`) REFERENCES `syncs`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`evaluation_id`) REFERENCES `evaluations`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`observed_sync_id`) REFERENCES `syncs`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE TABLE `cards` (
@@ -110,6 +124,17 @@ CREATE TABLE `categories` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `categories_user_name` ON `categories` (`user_id`,`name`);--> statement-breakpoint
+CREATE TABLE `evaluations` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`account_id` integer NOT NULL,
+	`sync_id` integer,
+	`as_of` text NOT NULL,
+	`created_at` text NOT NULL,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`sync_id`) REFERENCES `syncs`(`id`) ON UPDATE no action ON DELETE set null
+);
+--> statement-breakpoint
+CREATE INDEX `evaluations_account` ON `evaluations` (`account_id`,`id`);--> statement-breakpoint
 CREATE TABLE `findings` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`card_id` integer NOT NULL,
@@ -118,15 +143,15 @@ CREATE TABLE `findings` (
 	`cents` integer,
 	`message` text NOT NULL,
 	`activity_ids` text NOT NULL,
-	`first_seen_sync_id` integer NOT NULL,
-	`last_seen_sync_id` integer NOT NULL,
-	`resolved_sync_id` integer,
+	`first_seen_evaluation_id` integer NOT NULL,
+	`last_seen_evaluation_id` integer NOT NULL,
+	`resolved_evaluation_id` integer,
 	`explained_at` text,
 	`explanation` text,
 	FOREIGN KEY (`card_id`) REFERENCES `cards`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`first_seen_sync_id`) REFERENCES `syncs`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`last_seen_sync_id`) REFERENCES `syncs`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`resolved_sync_id`) REFERENCES `syncs`(`id`) ON UPDATE no action ON DELETE set null
+	FOREIGN KEY (`first_seen_evaluation_id`) REFERENCES `evaluations`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`last_seen_evaluation_id`) REFERENCES `evaluations`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`resolved_evaluation_id`) REFERENCES `evaluations`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `findings_card_fingerprint` ON `findings` (`card_id`,`fingerprint`);--> statement-breakpoint
@@ -144,9 +169,9 @@ CREATE TABLE `opening_balances` (
 	`cents` integer NOT NULL,
 	`source` text NOT NULL,
 	`set_at` text NOT NULL,
-	`set_by_sync_id` integer,
+	`set_by_evaluation_id` integer,
 	FOREIGN KEY (`card_id`) REFERENCES `cards`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`set_by_sync_id`) REFERENCES `syncs`(`id`) ON UPDATE no action ON DELETE set null
+	FOREIGN KEY (`set_by_evaluation_id`) REFERENCES `evaluations`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
 CREATE TABLE `raw_orders` (
@@ -196,16 +221,21 @@ CREATE TABLE `syncs` (
 	`started_at` text NOT NULL,
 	`finished_at` text,
 	`status` text NOT NULL,
+	`failed_stage` text,
 	`error` text,
+	`ingested_at` text,
 	`rows_new` integer DEFAULT 0 NOT NULL,
 	`rows_updated` integer DEFAULT 0 NOT NULL,
+	`rows_missing` integer DEFAULT 0 NOT NULL,
 	`window_from` text,
 	`window_to` text,
+	`orders_from` text,
 	`normalized_from` text,
 	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE INDEX `syncs_account_started` ON `syncs` (`account_id`,`started_at`);--> statement-breakpoint
+CREATE UNIQUE INDEX `syncs_one_running` ON `syncs` (`account_id`) WHERE status = 'running';--> statement-breakpoint
 CREATE TABLE `users` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`username` text NOT NULL,
