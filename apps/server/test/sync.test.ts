@@ -1,4 +1,4 @@
-import { authorization, CARD_A, CARD_B, card, fee, order, posting } from "@twofiat/client/fixtures";
+import { authorization, CARD_A, CARD_B, card, order, posting } from "@twofiat/client/fixtures";
 import { asc, eq } from "drizzle-orm";
 import { describe, expect, test, vi } from "vitest";
 import { createAccount } from "../src/accounts.ts";
@@ -21,6 +21,7 @@ import { canonicalJson } from "../src/ingest.ts";
 import { Secrets } from "../src/secrets.ts";
 import { SyncAlreadyRunningError, SyncRunner } from "../src/sync.ts";
 import { fake2fiat } from "./fake-2fiat.ts";
+import { scenario } from "./scenario.ts";
 
 const control = vi.hoisted(() => ({ failNormalize: false }));
 vi.mock("../src/ledger.ts", async (importOriginal) => {
@@ -36,46 +37,6 @@ vi.mock("../src/ledger.ts", async (importOriginal) => {
 
 const APP_SECRET = Buffer.alloc(32, 7).toString("base64");
 const TOKEN = "token1abc123";
-
-/**
- * Card A has its whole history: issued with $20, then a $5 purchase and its fee, leaving $14.50.
- * Card B was inherited: $100 reported, with only a $20 purchase visible, so its opening balance must be $120.
- */
-function scenario() {
-  const issue = order({
-    card: CARD_A,
-    at: "2026-08-19T01:30:00.000Z",
-    amount: 50,
-    orderType: "issue",
-    status: "paid_fully",
-  });
-  const authA = authorization({
-    card: CARD_A,
-    at: "2026-10-10T08:00:00.000Z",
-    amount: "-5.00",
-    description: "SHOP SPRINGFIELD USA",
-  });
-  const feeA = fee({ card: CARD_A, at: "2026-10-10T08:00:01.000Z" });
-  const postA = posting({
-    card: CARD_A,
-    at: "2026-10-10T22:00:00.000Z",
-    amount: "-5.00",
-    description: "SHOP",
-  });
-  const authB = authorization({
-    card: CARD_B,
-    at: "2026-10-12T08:00:00.000Z",
-    amount: "-20.00",
-    description: "CAFE SPRINGFIELD USA",
-  });
-  const postB = posting({
-    card: CARD_B,
-    at: "2026-10-12T20:00:00.000Z",
-    amount: "-20.00",
-    description: "CAFE",
-  });
-  return { issue, authA, feeA, postA, authB, postB };
-}
 
 function setup(options: { today?: string } = {}) {
   const db = openDb(":memory:");
@@ -338,10 +299,12 @@ describe("SyncRunner", () => {
 
   test("a second trigger while a sync runs gets the same sync", async () => {
     const s = setup();
-    const first = s.runner.sync(s.accountId, "manual");
-    const second = s.runner.sync(s.accountId, "scheduled");
+    const first = s.runner.start(s.accountId, "manual");
+    const second = s.runner.start(s.accountId, "scheduled");
     expect(second).toBe(first);
-    await first;
+    expect(s.runner.isRunning(s.accountId)).toBe(true);
+    await first.done;
+    expect(s.runner.isRunning(s.accountId)).toBe(false);
     expect(s.db.select().from(syncs).all()).toHaveLength(1);
   });
 

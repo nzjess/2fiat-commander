@@ -16,6 +16,8 @@ export function fake2fiat(initial: {
     transactions: initial.transactions ?? [],
     orders: initial.orders ?? [],
     sid: "sid-1",
+    /** When set, the exchange rejects any other token. */
+    validTokens: undefined as string[] | undefined,
     balancesAfterRows: undefined as Record<string, number> | undefined,
   };
   let rowsFetched = false;
@@ -24,6 +26,10 @@ export function fake2fiat(initial: {
     const path = call.url.pathname.replace(/^\/api\/v1\//, "");
     const q = call.url.searchParams;
     if (call.method === "POST" && path === "auth/exchange") {
+      const token = (call.body as { token?: string } | undefined)?.token ?? "";
+      if (state.validTokens && !state.validTokens.includes(token)) {
+        return json({ error: "Invalid token" }, { status: 401 });
+      }
       return json({ ok: true, redirectPath: "/wallet/my-cards" }, { headers: sidCookie(state.sid) });
     }
     if (call.headers.cookie !== `sid=${state.sid}`) return json({ error: "Unauthorized" }, { status: 401 });

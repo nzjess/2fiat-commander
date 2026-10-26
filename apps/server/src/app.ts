@@ -1,5 +1,35 @@
 import { Hono } from "hono";
+import { csrf } from "hono/csrf";
+import { accountRoutes, accountScopedRoutes } from "./api/accounts.ts";
+import { activityRoutes } from "./api/activities.ts";
+import { authRoutes } from "./api/auth.ts";
+import { cardRoutes } from "./api/cards.ts";
+import { type AppDeps, handleError, loadAccount, requireUser } from "./api/common.ts";
+import { findingRoutes } from "./api/findings.ts";
 
-export const app = new Hono().basePath("/api").get("/health", (c) => c.json({ ok: true }));
+export type { AppDeps } from "./api/common.ts";
 
-export type App = typeof app;
+/**
+ * The HTTP API, under `/api`. Everything but `/health` and `/auth/login` needs a session, and everything under
+ * `/accounts/:accountId` needs that account to be the user's.
+ */
+export function createApp(deps: AppDeps) {
+  return (
+    new Hono()
+      .basePath("/api")
+      .onError(handleError)
+      // Rejects cross-origin form-style requests. Our JSON ones can't be sent cross-origin without CORS.
+      .use(csrf())
+      .get("/health", (c) => c.json({ ok: true }))
+      .route("/auth", authRoutes(deps))
+      .use("/accounts/*", requireUser(deps))
+      .route("/accounts", accountRoutes(deps))
+      .use("/accounts/:accountId/*", loadAccount(deps))
+      .route("/accounts/:accountId", accountScopedRoutes(deps))
+      .route("/accounts/:accountId", cardRoutes(deps))
+      .route("/accounts/:accountId", activityRoutes(deps))
+      .route("/accounts/:accountId", findingRoutes(deps))
+  );
+}
+
+export type App = ReturnType<typeof createApp>;

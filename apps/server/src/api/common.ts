@@ -1,0 +1,128 @@
+import type { SessionOptions } from "@twofiat/client";
+import { TwoFiatAuthError } from "@twofiat/client";
+import { and, eq } from "drizzle-orm";
+import type { Context, ErrorHandler, MiddlewareHandler } from "hono";
+import { getCookie, setCookie } from "hono/cookie";
+import { HTTPException } from "hono/http-exception";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { AccountArchivedError, DuplicateAccountError } from "../accounts.ts";
+import { resolveSession, SESSION_COOKIE, type SessionUser } from "../auth.ts";
+import type { Db } from "../db/db.ts";
+import { accounts } from "../db/schema.ts";
+import { LedgerNotReadyError } from "../evaluate.ts";
+import type { Secrets } from "../secrets.ts";
+import { SyncAlreadyRunningError, type SyncRunner } from "../sync.ts";
+
+export interface AppDeps {
+  db: Db;
+  secrets: Secrets;
+  runner: SyncRunner;
+  now?: () => Date;
+  /** Passed through to the 2fiat session that checks a new token (e.g. `fetch` in tests). */
+  session?: Pick<SessionOptions, "baseUrl" | "fetch" | "sleep" | "maxRetries" | "userAgent">;
+}
+
+export type AccountRow = typeof accounts.$inferSelect;
+export type UserEnv = { Variables: { user: SessionUser } };
+export type AccountEnv = { Variables: { user: SessionUser; account: AccountRow } };
+
+/** An error with a status and a machine-readable code, returned as `{ error, message }`. */
+export class ApiError extends Error {
+  readonly status: ContentfulStatusCode;
+  readonly code: string;
+
+  constructor(status: ContentfulStatusCode, code: string, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+export const notFound = (what: string) => new ApiError(404, "not_found", `${what} not found`);
+
+export const handleError: ErrorHandler = (err, c) => {
+  const known = toApiError(err);
+  if (known) return c.json({ error: known.code, message: known.message }, known.status);
+  if (err instanceof HTTPException) return err.getResponse();
+  console.error(err);
+  return c.json({ error: "internal", message: "internal server error" }, 500);
+};
+
+function toApiError(err: Error): ApiError | undefined {
+  if (err instanceof ApiError) return err;
+  if (err instanceof DuplicateAccountError) return new ApiError(409, "duplicate_account", err.message);
+  if (err instanceof AccountArchivedError) return new ApiError(409, "account_archived", err.message);
+  if (err instanceof SyncAlreadyRunningError) return new ApiError(409, "sync_running", err.message);
+  if (err instanceof LedgerNotReadyError) return new ApiError(409, "ledger_not_ready", err.message);
+  if (err instanceof TwoFiatAuthError) return new ApiError(422, "token_rejected", "2fiat rejected the token");
+  return undefined;
+}
+
+/** The hook for `zValidator`: a failed validation is a 400 in our error shape. */
+export const invalid = (
+  result: {
+    success: boolean;
+    error?: { issues: readonly { path: readonly PropertyKey[]; message: string }[] };
+  },
+  c: Context,
+) => {
+  if (!result.success) {
+    const issues = result.error?.issues ?? [];
+    const describe = (i: (typeof issues)[number]) =>
+      i.path.length ? `${i.path.map(String).join(".")}: ${i.message}` : i.message;
+    return c.json({ error: "invalid_request", message: issues.map(describe).join("; ") }, 400);
+  }
+};
+
+/** A positive integer path parameter, or a 404. */
+export function idParam(c: Context, name: string, what: string): number {
+  const value = c.req.param(name);
+  const id = Number(value);
+  if (!value || !/^\d+$/.test(value) || !Number.isSafeInteger(id) || id <= 0) throw notFound(what);
+  return id;
+}
+
+/** Secure cookies everywhere but plain-http localhost, where browsers would drop them. */
+const secureCookies = (c: Context) => {
+  const url = new URL(c.req.url);
+  return url.protocol === "https:" || !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+};
+
+export function setSessionCookie(c: Context, token: string, expires: Date): void {
+  setCookie(c, SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: "Lax",
+    secure: secureCookies(c),
+    path: "/",
+    expires,
+  });
+}
+
+/** Rejects requests without a live session, and sets `user`. */
+export function requireUser(deps: AppDeps): MiddlewareHandler<UserEnv> {
+  const now = deps.now ?? (() => new Date());
+  return async (c, next) => {
+    const token = getCookie(c, SESSION_COOKIE);
+    const session = token ? resolveSession(deps.db, token, now()) : undefined;
+    if (!token || !session) throw new ApiError(401, "unauthenticated", "not logged in");
+    if (session.renewedUntil) setSessionCookie(c, token, session.renewedUntil);
+    c.set("user", session.user);
+    await next();
+  };
+}
+
+/** Loads the `:accountId` account, if it's the user's, and sets `account`. Someone else's is a 404 too. */
+export function loadAccount(deps: AppDeps): MiddlewareHandler<AccountEnv> {
+  return async (c, next) => {
+    const id = idParam(c, "accountId", "account");
+    const account = deps.db
+      .select()
+      .from(accounts)
+      .where(and(eq(accounts.id, id), eq(accounts.userId, c.var.user.id)))
+      .get();
+    if (!account) throw notFound("account");
+    c.set("account", account);
+    await next();
+  };
+}

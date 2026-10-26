@@ -10,6 +10,7 @@ import type {
 } from "@twofiat/client";
 import { sql } from "drizzle-orm";
 import {
+  type AnySQLiteColumn,
   check,
   foreignKey,
   index,
@@ -61,7 +62,8 @@ export const accounts = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     label: text().notNull(),
-    tokenEnc: text("token_enc").notNull(),
+    /** Null once the account is archived. */
+    tokenEnc: text("token_enc"),
     /** HMAC of the token: encryption uses a random IV, so this is what detects a token added twice. */
     tokenHash: text("token_hash").notNull(),
     sidEnc: text("sid_enc"),
@@ -71,6 +73,11 @@ export const accounts = sqliteTable(
      * at or after it. Null when the ledger is up to date, "" when the whole ledger needs rebuilding.
      */
     ledgerDirtyFrom: text("ledger_dirty_from"),
+    /** An archived account stays viewable but never syncs again, e.g. after 2fiat replaced its token. */
+    archivedAt: text("archived_at"),
+    replacedByAccountId: integer("replaced_by_account_id").references((): AnySQLiteColumn => accounts.id, {
+      onDelete: "set null",
+    }),
     createdAt: createdAt(),
   },
   (t) => [unique("accounts_user_token").on(t.userId, t.tokenHash)],

@@ -2,13 +2,16 @@ CREATE TABLE `accounts` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`user_id` integer NOT NULL,
 	`label` text NOT NULL,
-	`token_enc` text NOT NULL,
+	`token_enc` text,
 	`token_hash` text NOT NULL,
 	`sid_enc` text,
 	`sid_expires_at` text,
 	`ledger_dirty_from` text,
+	`archived_at` text,
+	`replaced_by_account_id` integer,
 	`created_at` text NOT NULL,
-	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`replaced_by_account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `accounts_user_token` ON `accounts` (`user_id`,`token_hash`);--> statement-breakpoint

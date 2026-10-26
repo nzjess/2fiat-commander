@@ -7,6 +7,7 @@ import {
   TwoFiatSession,
 } from "@twofiat/client";
 import { eq } from "drizzle-orm";
+import { AccountArchivedError, SID_TTL_MS } from "./accounts.ts";
 import type { Db } from "./db/db.ts";
 import { accounts, type SyncStage, syncs } from "./db/schema.ts";
 import { type EvaluateResult, evaluate } from "./evaluate.ts";
@@ -14,9 +15,6 @@ import { ingest, type Pull, planPull, windowStart } from "./ingest.ts";
 import { normalizeAccount } from "./ledger.ts";
 import type { Secrets } from "./secrets.ts";
 import { utcDay } from "./time.ts";
-
-/** 2fiat's `sid` cookie lasts 14 days. */
-const SID_TTL_MS = 14 * 86_400_000;
 
 export interface SyncRunnerOptions {
   db: Db;
@@ -34,6 +32,12 @@ export interface SyncOutcome {
   sync: SyncRow;
   /** Undefined when the sync failed before evaluating. */
   evaluation: EvaluateResult | undefined;
+}
+
+export interface StartedSync {
+  syncId: number;
+  /** Never rejects: a failure is recorded on the sync. */
+  done: Promise<SyncOutcome>;
 }
 
 export class SyncAlreadyRunningError extends Error {
@@ -57,7 +61,7 @@ export class SyncRunner {
   readonly #overlapDays: number;
   readonly #session: SyncRunnerOptions["session"];
   readonly #now: () => Date;
-  readonly #running = new Map<number, Promise<SyncOutcome>>();
+  readonly #running = new Map<number, StartedSync>();
 
   constructor(options: SyncRunnerOptions) {
     this.#db = options.db;
@@ -76,19 +80,26 @@ export class SyncRunner {
       .run().changes;
   }
 
-  sync(accountId: number, trigger: SyncRow["trigger"]): Promise<SyncOutcome> {
+  /**
+   * Starts a sync of an account, or joins the one already running in this process, and returns its id once its
+   * `syncs` row exists. Throws `AccountArchivedError` for an archived account, and `SyncAlreadyRunningError` when
+   * another process is syncing it.
+   */
+  start(accountId: number, trigger: SyncRow["trigger"]): StartedSync {
     const running = this.#running.get(accountId);
     if (running) return running;
-    const run = this.#run(accountId, trigger).finally(() => this.#running.delete(accountId));
-    this.#running.set(accountId, run);
-    return run;
-  }
 
-  async #run(accountId: number, trigger: SyncRow["trigger"]): Promise<SyncOutcome> {
-    const db = this.#db;
+    const account = this.#db
+      .select({ archivedAt: accounts.archivedAt })
+      .from(accounts)
+      .where(eq(accounts.id, accountId))
+      .get();
+    if (!account) throw new Error(`No account ${accountId}`);
+    if (account.archivedAt !== null) throw new AccountArchivedError(accountId);
+
     let syncId: number;
     try {
-      syncId = db
+      syncId = this.#db
         .insert(syncs)
         .values({ accountId, trigger, status: "running", startedAt: this.#now().toISOString() })
         .returning({ id: syncs.id })
@@ -97,7 +108,26 @@ export class SyncRunner {
       if (String(err).includes("UNIQUE constraint failed")) throw new SyncAlreadyRunningError(accountId);
       throw err;
     }
+    const started = {
+      syncId,
+      done: this.#run(accountId, syncId).finally(() => this.#running.delete(accountId)),
+    };
+    this.#running.set(accountId, started);
+    return started;
+  }
 
+  /** Syncs an account, or joins the sync already running in this process, and resolves when it has finished. */
+  async sync(accountId: number, trigger: SyncRow["trigger"]): Promise<SyncOutcome> {
+    return this.start(accountId, trigger).done;
+  }
+
+  /** Whether this process is syncing the account. */
+  isRunning(accountId: number): boolean {
+    return this.#running.has(accountId);
+  }
+
+  async #run(accountId: number, syncId: number): Promise<SyncOutcome> {
+    const db = this.#db;
     let stage: SyncStage = "fetch";
     let evaluation: EvaluateResult | undefined;
     try {
@@ -176,6 +206,7 @@ export class SyncRunner {
   #openSession(accountId: number): TwoFiatSession {
     const account = this.#db.select().from(accounts).where(eq(accounts.id, accountId)).get();
     if (!account) throw new Error(`No account ${accountId}`);
+    if (account.tokenEnc === null) throw new AccountArchivedError(accountId);
     const sidValid =
       account.sidEnc && account.sidExpiresAt && account.sidExpiresAt > this.#now().toISOString();
     return new TwoFiatSession({

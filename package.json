@@ -11,7 +11,9 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "capture": "node --env-file=.env packages/twofiat-client/scripts/capture.ts",
-    "report": "node packages/twofiat-client/scripts/report.ts"
+    "report": "node packages/twofiat-client/scripts/report.ts",
+    "user:add": "node --env-file-if-exists=.env apps/server/scripts/user.ts add",
+    "user:passwd": "node --env-file-if-exists=.env apps/server/scripts/user.ts passwd"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.3",

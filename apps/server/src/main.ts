@@ -1,8 +1,37 @@
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { serve } from "@hono/node-server";
-import { app } from "./app.ts";
+import { createApp } from "./app.ts";
+import { loadConfig } from "./config.ts";
+import { openDb } from "./db/db.ts";
+import { rebuildOutdated } from "./reevaluate.ts";
+import { Scheduler } from "./scheduler.ts";
+import { Secrets } from "./secrets.ts";
+import { SyncRunner } from "./sync.ts";
 
-const port = Number(process.env.PORT ?? 3000);
+const config = loadConfig();
+mkdirSync(dirname(config.databasePath), { recursive: true });
+const db = openDb(config.databasePath);
+const secrets = new Secrets(config.appSecret);
+const runner = new SyncRunner({ db, secrets, overlapDays: config.syncOverlapDays });
 
-serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, (info) => {
-  console.log(`server listening on http://127.0.0.1:${info.port}`);
-});
+const interrupted = runner.recover();
+if (interrupted > 0) console.log(`marked ${interrupted} interrupted sync(s) failed`);
+try {
+  const rebuilt = rebuildOutdated(db, new Date());
+  if (rebuilt.length > 0) console.log(`rebuilt the ledger of account(s) ${rebuilt.join(", ")}`);
+} catch (err) {
+  // The raw rows are kept and the ledger stays marked dirty, so the next sync retries it.
+  console.error("rebuilding outdated ledgers failed:", err);
+}
+if (config.syncIntervalMinutes > 0) {
+  new Scheduler({ db, runner, intervalMinutes: config.syncIntervalMinutes }).start();
+  console.log(`syncing every ${config.syncIntervalMinutes} minutes`);
+}
+
+serve(
+  { fetch: createApp({ db, secrets, runner }).fetch, hostname: config.host, port: config.port },
+  (info) => {
+    console.log(`server listening on http://${config.host}:${info.port}`);
+  },
+);

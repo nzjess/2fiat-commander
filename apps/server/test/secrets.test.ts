@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createAccount } from "../src/accounts.ts";
+import { createAccount, DuplicateAccountError } from "../src/accounts.ts";
 import { openDb } from "../src/db/db.ts";
 import { users } from "../src/db/schema.ts";
 import { Secrets } from "../src/secrets.ts";
@@ -40,6 +40,8 @@ describe("createAccount", () => {
     const userId = db.insert(users).values({ username: "u", passwordHash: "x" }).returning().get().id;
     expect(() => createAccount(db, secrets, { userId, label: "a", token: "https://2fiat.com" })).toThrow();
     createAccount(db, secrets, { userId, label: "a", token: "token1abc" });
-    expect(() => createAccount(db, secrets, { userId, label: "b", token: "token1abc" })).toThrow(/UNIQUE/);
+    expect(() => createAccount(db, secrets, { userId, label: "b", token: "token1abc" })).toThrow(
+      DuplicateAccountError,
+    );
   });
 });
