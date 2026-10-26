@@ -1,4 +1,4 @@
-import { authorization, CARD_A, CARD_B, card, order } from "@twofiat/client/fixtures";
+import { authorization, CARD_A, CARD_B, card, order, topupRow, withdraw } from "@twofiat/client/fixtures";
 import { eq } from "drizzle-orm";
 import { type ClientResponse, hc } from "hono/client";
 import type { SuccessStatusCode } from "hono/utils/http-status";
@@ -354,7 +354,6 @@ describe("cards and balances", () => {
     const param = { ...s.param, logicalCardId: String(a?.logicalCardId) };
     const history = await ok(s.account["logical-cards"][":logicalCardId"]["balance-history"].$get({ param }));
 
-    expect(history.currency).toBe("USD");
     const at = history.points.map((p) => p.at);
     expect(at).toEqual([...at].sort());
     // It ends at the two ledgers' sum: A's $12.50 and B's $100.
@@ -394,6 +393,55 @@ describe("cards and balances", () => {
     expect(
       (
         await s.account["logical-cards"][":logicalCardId"]["balance-history"].$get({
+          param: { ...s.param, logicalCardId: "999" },
+        })
+      ).status,
+    ).toBe(404);
+  });
+
+  test("a logical card's spending is its money in and out, without transfers between its own cards", async () => {
+    const s = await synced();
+    // $10 moves from A to B: a withdrawal on A, and a top-up on B a second later.
+    s.twofiat.state.transactions.push(
+      withdraw({ card: CARD_A, at: "2026-10-18T09:00:00.000Z", amount: "10.00" }),
+      topupRow({ card: CARD_B, at: "2026-10-18T09:00:01.000Z", amount: "+10.00" }),
+    );
+    s.twofiat.state.cards = [card({ id: CARD_A, balance: 2.5 }), card({ id: CARD_B, balance: 110 })];
+    await s.runner.sync(s.accountId, "manual");
+    const cards = await s.cardsByTwofiatId();
+    const [a, b] = [cards.get(CARD_A), cards.get(CARD_B)];
+    const flows = async (logicalCardId: number | undefined) =>
+      (
+        await ok(
+          s.account["logical-cards"][":logicalCardId"].spending.$get({
+            param: { ...s.param, logicalCardId: String(logicalCardId) },
+          }),
+        )
+      ).activities;
+
+    // Apart, the transfer is money out of one and into the other.
+    const ofA = await flows(a?.logicalCardId);
+    expect(ofA.map((f) => [f.kind, f.amountCents])).toContainEqual(["transfer_out", -1000]);
+    expect(ofA.every((f) => f.amountCents !== 0 && f.cardId === a?.id)).toBe(true);
+    expect(ofA.map((f) => f.at)).toEqual(ofA.map((f) => f.at).sort());
+    expect((await flows(b?.logicalCardId)).map((f) => [f.kind, f.amountCents])).toContainEqual([
+      "transfer_in",
+      1000,
+    ]);
+
+    // Together, it only moved money within the card.
+    await ok(
+      s.account.cards[":cardId"].$patch({
+        param: { ...s.param, cardId: String(b?.id) },
+        json: { logicalCardId: a?.logicalCardId ?? 0 },
+      }),
+    );
+    const merged = await flows(a?.logicalCardId);
+    expect(merged.some((f) => f.kind === "transfer_in" || f.kind === "transfer_out")).toBe(false);
+    expect(merged.map((f) => f.description)).toContain("CAFE SPRINGFIELD USA");
+    expect(
+      (
+        await s.account["logical-cards"][":logicalCardId"].spending.$get({
           param: { ...s.param, logicalCardId: "999" },
         })
       ).status,

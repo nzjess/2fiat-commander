@@ -128,10 +128,10 @@ function LogicalCardPanel({
         {balance ? (
           <Group gap="xs">
             <Text size="sm" c="dimmed">
-              Ledger {formatMoney(balance.ledgerCents, current.currency)}
-              {balance.holdsCents !== 0 && ` (${formatMoney(balance.holdsCents, current.currency)} held)`}
+              Ledger {formatMoney(balance.ledgerCents)}
+              {balance.holdsCents !== 0 && ` (${formatMoney(balance.holdsCents)} held)`}
             </Text>
-            <GapBadge cents={balance.gapCents} currency={current.currency} />
+            <GapBadge cents={balance.gapCents} />
             {balance.transient && <TransientBadge />}
           </Group>
         ) : (

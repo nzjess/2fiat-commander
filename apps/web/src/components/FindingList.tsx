@@ -118,7 +118,7 @@ function FindingItem({
           </Group>
           {finding.cents !== null && card && (
             <Text fw={600} size="sm" style={{ whiteSpace: "nowrap" }}>
-              {formatMoney(finding.cents, card.currency, { signed: true })}
+              {formatMoney(finding.cents, { signed: true })}
             </Text>
           )}
         </Group>

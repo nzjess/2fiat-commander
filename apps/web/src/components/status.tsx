@@ -30,7 +30,7 @@ export function ErrorView({ error }: { error: unknown }) {
 }
 
 /** A balance gap: quiet at zero, red otherwise. */
-export function GapBadge({ cents, currency }: { cents: number; currency: string }) {
+export function GapBadge({ cents }: { cents: number }) {
   if (cents === 0) {
     return (
       <Badge color="green" variant="light">
@@ -41,7 +41,7 @@ export function GapBadge({ cents, currency }: { cents: number; currency: string 
   return (
     <Tooltip label="What 2fiat reports, minus what its rows explain">
       <Badge color="red" variant="light">
-        Gap {formatMoney(cents, currency, { signed: true })}
+        Gap {formatMoney(cents, { signed: true })}
       </Badge>
     </Tooltip>
   );

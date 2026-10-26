@@ -30,6 +30,16 @@ export function parseFindingsSearch(raw: Record<string, unknown>): FindingsSearc
   };
 }
 
+export interface InsightsSearch {
+  /** A logical card; absent means the first. */
+  card?: number;
+}
+
+export function parseInsightsSearch(raw: Record<string, unknown>): InsightsSearch {
+  const card = positiveInt(raw.card);
+  return card === undefined ? {} : { card };
+}
+
 /** Where to go after logging in: only a path on this site, so a crafted link can't send the user elsewhere. */
 export function safeRedirect(value: unknown): string | undefined {
   if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) {

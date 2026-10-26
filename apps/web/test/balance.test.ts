@@ -60,6 +60,7 @@ describe("per day", () => {
 });
 
 test("ranges count back from now", () => {
+  expect(rangeStart("7d", now)).toBe(now - 7 * 86_400_000);
   expect(rangeStart("30d", now)).toBe(now - 30 * 86_400_000);
   expect(rangeStart("all", now)).toBeUndefined();
 });

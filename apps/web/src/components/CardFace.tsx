@@ -52,7 +52,7 @@ export function CardFace({
   balanceCents,
   width = 320,
 }: {
-  card: Pick<Card, "alias" | "maskedNumber" | "expiresAt" | "product" | "currency" | "status">;
+  card: Pick<Card, "alias" | "maskedNumber" | "expiresAt" | "product" | "status">;
   balanceCents?: number | null;
   width?: number;
 }) {
@@ -88,7 +88,7 @@ export function CardFace({
         </Stack>
         {balanceCents != null && (
           <Text fw={700} fz="lg" lh={1.2}>
-            {formatMoney(balanceCents, card.currency)}
+            {formatMoney(balanceCents)}
           </Text>
         )}
       </Group>

@@ -16,6 +16,7 @@ import { Route as AppAccountsRouteImport } from './routes/_app/accounts'
 import { Route as AppAAccountIdRouteImport } from './routes/_app/a/$accountId'
 import { Route as AppAAccountIdIndexRouteImport } from './routes/_app/a/$accountId/index'
 import { Route as AppAAccountIdFindingsRouteImport } from './routes/_app/a/$accountId/findings'
+import { Route as AppAAccountIdInsightsRouteImport } from './routes/_app/a/$accountId/insights'
 import { Route as AppAAccountIdCardsLogicalCardIdRouteImport } from './routes/_app/a/$accountId/cards/$logicalCardId'
 
 const AppRoute = AppRouteImport.update({
@@ -52,6 +53,11 @@ const AppAAccountIdFindingsRoute = AppAAccountIdFindingsRouteImport.update({
   path: '/findings',
   getParentRoute: () => AppAAccountIdRoute,
 } as any)
+const AppAAccountIdInsightsRoute = AppAAccountIdInsightsRouteImport.update({
+  id: '/insights',
+  path: '/insights',
+  getParentRoute: () => AppAAccountIdRoute,
+} as any)
 const AppAAccountIdCardsLogicalCardIdRoute =
   AppAAccountIdCardsLogicalCardIdRouteImport.update({
     id: '/cards/$logicalCardId',
@@ -65,6 +71,7 @@ export interface FileRoutesByFullPath {
   '/accounts': typeof AppAccountsRoute
   '/a/$accountId': typeof AppAAccountIdRouteWithChildren
   '/a/$accountId/findings': typeof AppAAccountIdFindingsRoute
+  '/a/$accountId/insights': typeof AppAAccountIdInsightsRoute
   '/a/$accountId/': typeof AppAAccountIdIndexRoute
   '/a/$accountId/cards/$logicalCardId': typeof AppAAccountIdCardsLogicalCardIdRoute
 }
@@ -73,6 +80,7 @@ export interface FileRoutesByTo {
   '/accounts': typeof AppAccountsRoute
   '/': typeof AppIndexRoute
   '/a/$accountId/findings': typeof AppAAccountIdFindingsRoute
+  '/a/$accountId/insights': typeof AppAAccountIdInsightsRoute
   '/a/$accountId': typeof AppAAccountIdIndexRoute
   '/a/$accountId/cards/$logicalCardId': typeof AppAAccountIdCardsLogicalCardIdRoute
 }
@@ -84,6 +92,7 @@ export interface FileRoutesById {
   '/_app/': typeof AppIndexRoute
   '/_app/a/$accountId': typeof AppAAccountIdRouteWithChildren
   '/_app/a/$accountId/findings': typeof AppAAccountIdFindingsRoute
+  '/_app/a/$accountId/insights': typeof AppAAccountIdInsightsRoute
   '/_app/a/$accountId/': typeof AppAAccountIdIndexRoute
   '/_app/a/$accountId/cards/$logicalCardId': typeof AppAAccountIdCardsLogicalCardIdRoute
 }
@@ -95,6 +104,7 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/a/$accountId'
     | '/a/$accountId/findings'
+    | '/a/$accountId/insights'
     | '/a/$accountId/'
     | '/a/$accountId/cards/$logicalCardId'
   fileRoutesByTo: FileRoutesByTo
@@ -103,6 +113,7 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/'
     | '/a/$accountId/findings'
+    | '/a/$accountId/insights'
     | '/a/$accountId'
     | '/a/$accountId/cards/$logicalCardId'
   id:
@@ -113,6 +124,7 @@ export interface FileRouteTypes {
     | '/_app/'
     | '/_app/a/$accountId'
     | '/_app/a/$accountId/findings'
+    | '/_app/a/$accountId/insights'
     | '/_app/a/$accountId/'
     | '/_app/a/$accountId/cards/$logicalCardId'
   fileRoutesById: FileRoutesById
@@ -173,6 +185,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAAccountIdFindingsRouteImport
       parentRoute: typeof AppAAccountIdRoute
     }
+    '/_app/a/$accountId/insights': {
+      id: '/_app/a/$accountId/insights'
+      path: '/insights'
+      fullPath: '/a/$accountId/insights'
+      preLoaderRoute: typeof AppAAccountIdInsightsRouteImport
+      parentRoute: typeof AppAAccountIdRoute
+    }
     '/_app/a/$accountId/cards/$logicalCardId': {
       id: '/_app/a/$accountId/cards/$logicalCardId'
       path: '/cards/$logicalCardId'
@@ -185,12 +204,14 @@ declare module '@tanstack/react-router' {
 
 interface AppAAccountIdRouteChildren {
   AppAAccountIdFindingsRoute: typeof AppAAccountIdFindingsRoute
+  AppAAccountIdInsightsRoute: typeof AppAAccountIdInsightsRoute
   AppAAccountIdIndexRoute: typeof AppAAccountIdIndexRoute
   AppAAccountIdCardsLogicalCardIdRoute: typeof AppAAccountIdCardsLogicalCardIdRoute
 }
 
 const AppAAccountIdRouteChildren: AppAAccountIdRouteChildren = {
   AppAAccountIdFindingsRoute: AppAAccountIdFindingsRoute,
+  AppAAccountIdInsightsRoute: AppAAccountIdInsightsRoute,
   AppAAccountIdIndexRoute: AppAAccountIdIndexRoute,
   AppAAccountIdCardsLogicalCardIdRoute: AppAAccountIdCardsLogicalCardIdRoute,
 }

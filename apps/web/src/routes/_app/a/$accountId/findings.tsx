@@ -1,6 +1,7 @@
-import { Group, SegmentedControl, Select, Stack, Title } from "@mantine/core";
+import { Group, SegmentedControl, Select, Stack } from "@mantine/core";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { CardPageHeader } from "../../../../components/CardPageHeader.tsx";
 import { FindingList } from "../../../../components/FindingList.tsx";
 import { FINDING_KIND_LABELS } from "../../../../lib/format.ts";
 import { FINDING_STATUSES, type FindingStatus, parseFindingsSearch } from "../../../../lib/search.ts";
@@ -29,7 +30,14 @@ function Findings() {
 
   return (
     <Stack>
-      <Title order={2}>Findings</Title>
+      <CardPageHeader
+        accountId={accountId}
+        title="Findings"
+        logicalCards={logicalCards}
+        selected={logicalCards.find((l) => l.id === search.card)}
+        onSelect={(card) => navigate({ search: (prev) => ({ ...prev, card }) })}
+        allowAll
+      />
       <Group gap="sm">
         <SegmentedControl
           size="xs"
@@ -42,17 +50,6 @@ function Findings() {
                 status: value === "open" ? undefined : (value as FindingStatus),
               }),
             })
-          }
-        />
-        <Select
-          size="xs"
-          w={220}
-          placeholder="All cards"
-          clearable
-          data={logicalCards.map((l) => ({ value: String(l.id), label: l.name }))}
-          value={search.card === undefined ? null : String(search.card)}
-          onChange={(value) =>
-            navigate({ search: (prev) => ({ ...prev, card: value ? Number(value) : undefined }) })
           }
         />
         <Select
@@ -70,6 +67,7 @@ function Findings() {
         findings={findings}
         cards={cards}
         logicalCards={logicalCards}
+        showCard={search.card === undefined}
         readOnly={account.archivedAt !== null}
       />
     </Stack>

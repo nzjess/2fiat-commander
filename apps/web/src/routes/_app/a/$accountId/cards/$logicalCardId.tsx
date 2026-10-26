@@ -12,14 +12,15 @@ import {
   Title,
 } from "@mantine/core";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, notFound } from "@tanstack/react-router";
+import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { api, type Card, type LogicalCard, ok, send } from "../../../../../api.ts";
 import { AdjustmentList } from "../../../../../components/Adjustments.tsx";
-import { BalanceChart } from "../../../../../components/BalanceChart.tsx";
 import { CardFace } from "../../../../../components/CardFace.tsx";
+import { CardSelect } from "../../../../../components/CardPageHeader.tsx";
 import { FindingList } from "../../../../../components/FindingList.tsx";
 import { AnchorLink } from "../../../../../components/links.tsx";
+import { SpendingChart } from "../../../../../components/SpendingChart.tsx";
 import { GapBadge, OpeningBadge, TransientBadge } from "../../../../../components/status.tsx";
 import {
   cardLabel,
@@ -34,10 +35,10 @@ import { positiveInt } from "../../../../../lib/search.ts";
 import {
   accountQuery,
   adjustmentsQuery,
-  balanceHistoryQuery,
   cardsQuery,
   findingsQuery,
   logicalCardsQuery,
+  spendingQuery,
 } from "../../../../../queries.ts";
 
 /**
@@ -54,7 +55,7 @@ export const Route = createFileRoute("/_app/a/$accountId/cards/$logicalCardId")(
       queryClient.ensureQueryData(cardsQuery(accountId)),
       queryClient.ensureQueryData(findingsQuery(accountId, { card: id })),
       queryClient.ensureQueryData(adjustmentsQuery(accountId, id)),
-      queryClient.ensureQueryData(balanceHistoryQuery(accountId, id)),
+      queryClient.ensureQueryData(spendingQuery(accountId, id)),
     ]);
   },
   component: LogicalCardPage,
@@ -67,6 +68,7 @@ function LogicalCardPage() {
   const { data: cards } = useSuspenseQuery(cardsQuery(accountId));
   const { data: logicalCards } = useSuspenseQuery(logicalCardsQuery(accountId));
   const { data: findings } = useSuspenseQuery(findingsQuery(accountId, { card: id }));
+  const navigate = useNavigate();
   const logical = logicalCards.find((l) => l.id === id);
   // E.g. just after its last physical card moved into another logical card.
   if (!logical) return <Text c="dimmed">This card no longer exists.</Text>;
@@ -82,13 +84,25 @@ function LogicalCardPage() {
 
   return (
     <Stack gap="lg">
+      <Group justify="flex-end">
+        <CardSelect
+          logicalCards={logicalCards}
+          selected={logical}
+          onSelect={(other) =>
+            other !== undefined &&
+            navigate({
+              to: "/a/$accountId/cards/$logicalCardId",
+              params: { accountId, logicalCardId: String(other) },
+            })
+          }
+        />
+      </Group>
       <Group align="flex-start" gap="xl">
         <CardFace card={current} balanceCents={logical.balance?.reportedCents} width={340} />
         <Stack gap={4}>
           <Name accountId={accountId} logical={logical} />
           <Text c="dimmed" size="sm">
-            {cardLabel(current)} · {current.product} · {current.currency} · expires{" "}
-            {formatMonth(current.expiresAt)}
+            {cardLabel(current)} · {current.product} · expires {formatMonth(current.expiresAt)}
             {!isActive(current) && ` · status ${current.status}`}
           </Text>
           {members.length > 1 && (
@@ -101,8 +115,15 @@ function LogicalCardPage() {
 
       <Balances logical={logical} current={current} />
 
-      <Section title="Balance over time">
-        <BalanceChart accountId={accountId} logicalCardId={id} />
+      <Section
+        title="Spending"
+        action={
+          <AnchorLink to="/a/$accountId/insights" params={{ accountId }} search={{ card: id }} size="sm">
+            More insights
+          </AnchorLink>
+        }
+      >
+        <SpendingChart accountId={accountId} logicalCardId={id} />
       </Section>
 
       <Section
@@ -114,7 +135,7 @@ function LogicalCardPage() {
             search={{ card: id, status: "all" }}
             size="sm"
           >
-            All of this card's findings
+            More findings
           </AnchorLink>
         }
       >
@@ -238,17 +259,17 @@ function Stat({ label, children }: { label: string; children: ReactNode }) {
 function Balances({ logical, current }: { logical: LogicalCard; current: Card }) {
   const b = logical.balance;
   if (!b) return <Text c="dimmed">Not evaluated yet: sync the account.</Text>;
-  const money = (cents: number) => formatMoney(cents, current.currency);
+  const money = (cents: number) => formatMoney(cents);
   return (
     <Stack gap="xs">
       <SimpleGrid cols={{ base: 2, sm: 4 }}>
         <Stat label="Reported by 2fiat">{money(b.reportedCents)}</Stat>
         <Stat label="Ledger">{money(b.ledgerCents)}</Stat>
         <Stat label="Held">{money(b.holdsCents)}</Stat>
-        <Stat label="Gap">{formatMoney(b.gapCents, current.currency, { signed: true })}</Stat>
+        <Stat label="Gap">{formatMoney(b.gapCents, { signed: true })}</Stat>
       </SimpleGrid>
       <Group gap="xs">
-        <GapBadge cents={b.gapCents} currency={current.currency} />
+        <GapBadge cents={b.gapCents} />
         {b.transient && <TransientBadge />}
         <Text size="xs" c="dimmed">
           {current.balance && `As of ${formatDateTime(current.balance.asOf)}. `}The ledger is the opening
@@ -341,8 +362,8 @@ function PhysicalCards({
               </Stack>
               {card.balance && (
                 <Group gap="xs">
-                  <Text size="sm">{formatMoney(card.balance.reportedCents, card.currency)}</Text>
-                  <GapBadge cents={card.balance.gapCents} currency={card.currency} />
+                  <Text size="sm">{formatMoney(card.balance.reportedCents)}</Text>
+                  <GapBadge cents={card.balance.gapCents} />
                 </Group>
               )}
             </Group>
@@ -420,7 +441,7 @@ function OpeningBalance({ accountId, card, readOnly }: { accountId: string; card
         <Text size="sm" c="dimmed">
           Opening balance
         </Text>
-        <Text size="sm">{opening ? formatMoney(opening.cents, card.currency) : "none"}</Text>
+        <Text size="sm">{opening ? formatMoney(opening.cents) : "none"}</Text>
         {opening && <OpeningBadge source={opening.source} />}
         {!readOnly && (
           <>
@@ -465,8 +486,7 @@ function OpeningBalance({ accountId, card, readOnly }: { accountId: string; card
             size="xs"
             w={160}
             inputMode="decimal"
-            leftSection={<Text size="xs">{card.currency}</Text>}
-            leftSectionWidth={44}
+            leftSection={<Text size="xs">$</Text>}
             value={draft}
             onChange={(e) => setDraft(e.currentTarget.value)}
             error={(draft !== "" && cents === undefined ? "e.g. 120.50" : undefined) ?? save.error?.message}

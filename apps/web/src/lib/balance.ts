@@ -122,6 +122,7 @@ export function dailyRows(
 }
 
 export const RANGES = [
+  { value: "7d", label: "7 days", days: 7 },
   { value: "30d", label: "30 days", days: 30 },
   { value: "90d", label: "90 days", days: 90 },
   { value: "1y", label: "1 year", days: 365 },

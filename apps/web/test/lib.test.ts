@@ -9,24 +9,20 @@ import {
   timeAgo,
   toCents,
 } from "../src/lib/format.ts";
-import { parseFindingsSearch, positiveInt, safeRedirect } from "../src/lib/search.ts";
+import { parseFindingsSearch, parseInsightsSearch, positiveInt, safeRedirect } from "../src/lib/search.ts";
 
 describe("money", () => {
-  test("formats cents in the card's currency", () => {
-    expect(formatMoney(1250, "USD", { locale: "en-US" })).toBe("$12.50");
-    expect(formatMoney(-3450, "USD", { locale: "en-US" })).toBe("-$34.50");
-    expect(formatMoney(0, "USD", { locale: "en-US" })).toBe("$0.00");
+  test("formats cents as US dollars, in any locale", () => {
+    expect(formatMoney(1250)).toBe("$12.50");
+    expect(formatMoney(-3450)).toBe("-$34.50");
+    expect(formatMoney(123_456_78)).toBe("$123,456.78");
+    expect(formatMoney(0)).toBe("$0.00");
   });
 
   test("signs gaps on request", () => {
-    expect(formatMoney(1000, "USD", { signed: true, locale: "en-US" })).toBe("+$10.00");
-    expect(formatMoney(-1200, "USD", { signed: true, locale: "en-US" })).toBe("-$12.00");
-    expect(formatMoney(0, "USD", { signed: true, locale: "en-US" })).toBe("$0.00");
-  });
-
-  test("falls back for a currency code Intl rejects", () => {
-    expect(formatMoney(1250, "??", { locale: "en-US" })).toBe("12.50 ??");
-    expect(formatMoney(1250, "??", { signed: true, locale: "en-US" })).toBe("+12.50 ??");
+    expect(formatMoney(1000, { signed: true })).toBe("+$10.00");
+    expect(formatMoney(-1200, { signed: true })).toBe("-$12.00");
+    expect(formatMoney(0, { signed: true })).toBe("$0.00");
   });
 
   test("reads typed dollars as cents, exactly", () => {
@@ -88,6 +84,11 @@ describe("search params", () => {
     expect(parseFindingsSearch({ status: "open", card: "7" })).toEqual({ card: 7 });
     expect(parseFindingsSearch({ status: "nope", card: -1, kind: "x;y" })).toEqual({});
     expect(parseFindingsSearch({ status: "explained" })).toEqual({ status: "explained" });
+  });
+
+  test("keeps only a well-formed insights card", () => {
+    expect(parseInsightsSearch({ card: "4" })).toEqual({ card: 4 });
+    expect(parseInsightsSearch({ card: "x" })).toEqual({});
   });
 
   test("reads positive integers", () => {

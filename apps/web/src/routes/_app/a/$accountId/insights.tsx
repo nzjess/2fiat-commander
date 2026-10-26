@@ -1,0 +1,69 @@
+import { Stack, Text, Title } from "@mantine/core";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
+import type { ReactNode } from "react";
+import { BalanceChart } from "../../../../components/BalanceChart.tsx";
+import { CardPageHeader } from "../../../../components/CardPageHeader.tsx";
+import { SpendingChart } from "../../../../components/SpendingChart.tsx";
+import { parseInsightsSearch } from "../../../../lib/search.ts";
+import { balanceHistoryQuery, logicalCardsQuery, spendingQuery } from "../../../../queries.ts";
+
+/** Every chart, graph and table about a logical card, in one place. */
+export const Route = createFileRoute("/_app/a/$accountId/insights")({
+  validateSearch: parseInsightsSearch,
+  loaderDeps: ({ search }) => search,
+  loader: async ({ context: { queryClient }, params: { accountId }, deps }) => {
+    const logicalCards = await queryClient.ensureQueryData(logicalCardsQuery(accountId));
+    const id = deps.card ?? logicalCards[0]?.id;
+    if (id === undefined || !logicalCards.some((l) => l.id === id)) return;
+    await Promise.all([
+      queryClient.ensureQueryData(spendingQuery(accountId, id)),
+      queryClient.ensureQueryData(balanceHistoryQuery(accountId, id)),
+    ]);
+  },
+  component: Insights,
+});
+
+function Insights() {
+  const { accountId } = Route.useParams();
+  const search = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const { data: logicalCards } = useSuspenseQuery(logicalCardsQuery(accountId));
+  const logical = logicalCards.find((l) => l.id === (search.card ?? logicalCards[0]?.id));
+
+  return (
+    <Stack gap="lg">
+      <CardPageHeader
+        accountId={accountId}
+        title="Insights"
+        logicalCards={logicalCards}
+        selected={logical}
+        onSelect={(card) => navigate({ search: card === undefined ? {} : { card } })}
+      />
+      {logical ? (
+        // Keyed by card, so each chart starts afresh for another card.
+        <Stack gap="lg" key={logical.id}>
+          <Section title="Spending">
+            <SpendingChart accountId={accountId} logicalCardId={logical.id} />
+          </Section>
+          <Section title="Balance over time">
+            <BalanceChart accountId={accountId} logicalCardId={logical.id} />
+          </Section>
+        </Stack>
+      ) : (
+        <Text c="dimmed">
+          {logicalCards.length === 0 ? "No cards yet: sync the account." : "No such card."}
+        </Text>
+      )}
+    </Stack>
+  );
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <Stack gap="xs">
+      <Title order={4}>{title}</Title>
+      {children}
+    </Stack>
+  );
+}

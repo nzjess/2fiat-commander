@@ -1,32 +1,16 @@
 import type { Card, FindingKind } from "../api.ts";
 
-const moneyFormats = new Map<string, Intl.NumberFormat>();
+// 2fiat runs purely in US dollars, so money is always USD: "$12.50" in any locale.
+const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+const signedMoney = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  signDisplay: "exceptZero",
+});
 
-/**
- * Integer cents as money in the given currency, e.g. "$12.50". `signed` always shows the sign, as gaps need.
- * An unknown currency code falls back to "12.50 XYZ".
- */
-export function formatMoney(
-  cents: number,
-  currency: string,
-  { signed = false, locale }: { signed?: boolean; locale?: string } = {},
-): string {
-  const key = `${locale}|${currency}|${signed}`;
-  let format = moneyFormats.get(key);
-  if (!format) {
-    try {
-      format = new Intl.NumberFormat(locale, {
-        style: "currency",
-        currency,
-        signDisplay: signed ? "exceptZero" : "auto",
-      });
-    } catch {
-      const amount = (cents / 100).toFixed(2);
-      return `${signed && cents > 0 ? "+" : ""}${amount} ${currency}`;
-    }
-    moneyFormats.set(key, format);
-  }
-  return format.format(cents / 100);
+/** Integer cents as dollars, e.g. "$12.50". `signed` always shows the sign, as gaps need. */
+export function formatMoney(cents: number, { signed = false }: { signed?: boolean } = {}): string {
+  return (signed ? signedMoney : money).format(cents / 100);
 }
 
 /** Dollars as typed into a form, as integer cents; undefined unless it's a number with at most two decimals. */

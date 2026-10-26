@@ -30,7 +30,7 @@ export function BalanceChart({ accountId, logicalCardId }: { accountId: string; 
     mode === "activity"
       ? activityRows(data.points, data.reported, from, now)
       : dailyRows(data.points, data.reported, from, now);
-  const money = (cents: number) => formatMoney(cents, data.currency);
+  const money = (cents: number) => formatMoney(cents);
 
   return (
     <Stack gap="xs">

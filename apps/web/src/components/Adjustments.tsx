@@ -68,7 +68,6 @@ function AdjustmentForm({
   const queryClient = useQueryClient();
   const [cardId, setCardId] = useState(draft.cardId ?? cards[0]?.id);
   const card = cards.find((c) => c.id === cardId);
-  const currency = card?.currency ?? "USD";
   // Only a new adjustment, not tied to a finding, can choose its card.
   const chooseCard = draft.id === undefined && draft.cardId === undefined && cards.length > 1;
   const [amount, setAmount] = useState(draft.cents === undefined ? "" : (draft.cents / 100).toFixed(2));
@@ -156,8 +155,7 @@ function AdjustmentForm({
           required
           autoFocus
           inputMode="decimal"
-          leftSection={<Text size="xs">{currency}</Text>}
-          leftSectionWidth={44}
+          leftSection={<Text size="sm">$</Text>}
           value={amount}
           onChange={(e) => setAmount(e.currentTarget.value)}
           error={amount !== "" && (cents === undefined || cents === 0) ? "e.g. 499.99 or -12.00" : undefined}
@@ -247,7 +245,7 @@ export function AdjustmentList({
                   <Table.Tr key={a.id}>
                     <Table.Td style={{ whiteSpace: "nowrap" }}>{formatDate(a.occurredAt)}</Table.Td>
                     <Table.Td ta="right" style={{ whiteSpace: "nowrap" }}>
-                      {formatMoney(a.cents, card?.currency ?? "USD", { signed: true })}
+                      {formatMoney(a.cents, { signed: true })}
                     </Table.Td>
                     <Table.Td style={{ whiteSpace: "pre-wrap" }}>
                       {a.note}

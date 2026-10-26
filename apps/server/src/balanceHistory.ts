@@ -13,7 +13,6 @@ export interface BalancePoint {
 }
 
 export interface BalanceHistory {
-  currency: string;
   /** Oldest first: one per change to the ledger. */
   points: BalancePoint[];
   /** What 2fiat reported at each evaluation, summed over the cards it saw. */
@@ -28,7 +27,7 @@ export interface BalanceHistory {
  */
 export function balanceHistory(db: Db, accountId: number, logicalCardId: number): BalanceHistory | undefined {
   const members = db
-    .select({ id: cards.id, currency: cards.currency, isCurrent: cards.isCurrent })
+    .select({ id: cards.id })
     .from(cards)
     .where(and(eq(cards.accountId, accountId), eq(cards.logicalCardId, logicalCardId)))
     .all();
@@ -84,6 +83,5 @@ export function balanceHistory(db: Db, accountId: number, logicalCardId: number)
     else reported.push({ at: s.at, cents: s.cents });
   }
 
-  const current = members.find((m) => m.isCurrent) ?? members[0];
-  return { currency: current?.currency ?? "USD", points, reported };
+  return { points, reported };
 }
