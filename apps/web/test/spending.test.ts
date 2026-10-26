@@ -4,7 +4,9 @@ import {
   FLOW_GROUPS,
   type Flow,
   type GroupKey,
+  groupColor,
   groupOf,
+  kindsByGroup,
   periodStart,
   presentGroups,
   spendingRows,
@@ -39,6 +41,17 @@ test("kinds fall into groups, unknown ones into other", () => {
   expect(groupOf("card_issue")).toBe("topups");
   expect(groupOf("transfer_in")).toBe("transfers");
   expect(groupOf("something-new")).toBe("other");
+});
+
+test("lists kinds under their groups, in the chart's order, with the groups' colours", () => {
+  expect(kindsByGroup(["declined", "fee", "card_issue", "purchase", "topup"])).toEqual([
+    { group: "Purchases", kinds: ["purchase"] },
+    { group: "Fees", kinds: ["fee"] },
+    { group: "Top-ups", kinds: ["card_issue", "topup"] },
+    { group: "Other", kinds: ["declined"] },
+  ]);
+  expect(groupColor("card_issue")).toBe("var(--mantine-color-green-6)");
+  expect(groupColor("something-new")).toBe("var(--mantine-color-gray-6)");
 });
 
 test("only the groups with activity are offered", () => {

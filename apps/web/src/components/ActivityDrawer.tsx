@@ -74,7 +74,14 @@ function Details({
     <Stack gap="lg">
       <Stack gap={4}>
         <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <Title order={4}>{a.description}</Title>
+          <Stack gap={2}>
+            <Title order={4}>{a.description}</Title>
+            {a.postedDescription && (
+              <Text size="xs" c="dimmed">
+                Posted as {a.postedDescription}
+              </Text>
+            )}
+          </Stack>
           <ActivityAmount activity={a} size="lg" />
         </Group>
         <Group gap="xs">
@@ -104,7 +111,6 @@ function Details({
           <Field label="Fee charged">
             {a.feeCents !== null && a.feeCents !== 0 && formatMoney(a.feeCents)}
           </Field>
-          <Field label="Posted as">{a.postedDescription}</Field>
           <Field label={a.kind === "transfer_in" ? "From" : "To"}>
             {counterpart &&
               `${cardLabel(counterpart)}${isOwnTransfer(a, logical) ? " (this card's own)" : ""}`}

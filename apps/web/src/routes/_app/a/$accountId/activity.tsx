@@ -1,7 +1,9 @@
 import {
   Alert,
   Button,
+  CheckIcon,
   CloseButton,
+  ColorSwatch,
   Group,
   MultiSelect,
   Pill,
@@ -29,6 +31,7 @@ import {
   type PageSize,
   parseActivitySearch,
 } from "../../../../lib/search.ts";
+import { groupColor, kindsByGroup } from "../../../../lib/spending.ts";
 import { activitiesQuery, cardsQuery, findingsQuery, logicalCardsQuery } from "../../../../queries.ts";
 
 /** A logical card's ledger, a page at a time, with filters and each activity's details in a drawer. */
@@ -103,6 +106,14 @@ function ActivityPage() {
   );
 }
 
+const KIND_OPTIONS = kindsByGroup(Object.keys(ACTIVITY_KIND_LABELS)).map(({ group, kinds }) => ({
+  group,
+  items: kinds.map((value) => ({
+    value,
+    label: ACTIVITY_KIND_LABELS[value as keyof typeof ACTIVITY_KIND_LABELS],
+  })),
+}));
+
 function Filters({
   accountId,
   search,
@@ -122,10 +133,54 @@ function Filters({
 
   return (
     <Stack gap="xs">
-      <Group gap="sm" align="flex-end">
+      <Group gap="sm" align="flex-end" wrap="wrap">
+        <MultiSelect
+          size="xs"
+          label="Kind"
+          // Takes the row's spare width, so several kinds fit.
+          style={{ flex: 1, minWidth: 240 }}
+          placeholder={search.kind ? undefined : "All kinds"}
+          // Under the spending chart's groups, each with its colour dot, as the table draws kinds.
+          data={KIND_OPTIONS}
+          // Tall enough for every kind and group heading (about 440px), so the list doesn't scroll.
+          maxDropdownHeight={460}
+          renderOption={({ option, checked }) => (
+            <Group gap={8} wrap="nowrap" style={{ flex: 1 }}>
+              <ColorSwatch color={groupColor(option.value)} size={8} withShadow={false} />
+              <Text size="xs" style={{ flex: 1 }}>
+                {option.label}
+              </Text>
+              {checked && <CheckIcon size={10} />}
+            </Group>
+          )}
+          renderPill={({ option, onRemove, disabled }) => (
+            <Pill withRemoveButton onRemove={onRemove} disabled={disabled}>
+              <Group gap={6} wrap="nowrap" component="span">
+                <ColorSwatch color={groupColor(String(option.value))} size={8} withShadow={false} />
+                {option.label}
+              </Group>
+            </Pill>
+          )}
+          value={split(search.kind)}
+          // Choosing fees shows them again.
+          onChange={(values) =>
+            update({ kind: join(values), ...(values.includes("fee") && { hideFees: undefined }) })
+          }
+          clearable
+        />
+        <MultiSelect
+          size="xs"
+          w={200}
+          label="Status"
+          placeholder={search.status ? undefined : "All statuses"}
+          data={Object.entries(ACTIVITY_STATUS_LABELS).map(([value, label]) => ({ value, label }))}
+          value={split(search.status)}
+          onChange={(values) => update({ status: join(values) })}
+          clearable
+        />
         <TextInput
           size="xs"
-          w={220}
+          w={240}
           label="Search"
           placeholder="Description"
           value={text}
@@ -146,29 +201,8 @@ function Filters({
             )
           }
         />
-        <MultiSelect
-          size="xs"
-          w={240}
-          label="Kind"
-          placeholder={search.kind ? undefined : "All kinds"}
-          data={Object.entries(ACTIVITY_KIND_LABELS).map(([value, label]) => ({ value, label }))}
-          value={split(search.kind)}
-          // Choosing fees shows them again.
-          onChange={(values) =>
-            update({ kind: join(values), ...(values.includes("fee") && { hideFees: undefined }) })
-          }
-          clearable
-        />
-        <MultiSelect
-          size="xs"
-          w={200}
-          label="Status"
-          placeholder={search.status ? undefined : "All statuses"}
-          data={Object.entries(ACTIVITY_STATUS_LABELS).map(([value, label]) => ({ value, label }))}
-          value={split(search.status)}
-          onChange={(values) => update({ status: join(values) })}
-          clearable
-        />
+      </Group>
+      <Group gap="sm" align="flex-end">
         <TextInput
           size="xs"
           type="date"
@@ -186,13 +220,6 @@ function Filters({
         <Switch
           size="xs"
           mb={6}
-          label="Stale holds only"
-          checked={search.stale === true}
-          onChange={(e) => update({ stale: e.currentTarget.checked || undefined })}
-        />
-        <Switch
-          size="xs"
-          mb={6}
           label="Hide fees"
           checked={search.hideFees === true}
           onChange={(e) =>
@@ -203,6 +230,13 @@ function Filters({
                 : { hideFees: undefined },
             )
           }
+        />
+        <Switch
+          size="xs"
+          mb={6}
+          label="Stale holds only"
+          checked={search.stale === true}
+          onChange={(e) => update({ stale: e.currentTarget.checked || undefined })}
         />
       </Group>
       {search.finding !== undefined && (

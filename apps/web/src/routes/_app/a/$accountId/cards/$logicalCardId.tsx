@@ -64,8 +64,9 @@ export const Route = createFileRoute("/_app/a/$accountId/cards/$logicalCardId")(
   component: LogicalCardPage,
 });
 
+// Without fees: every purchase has one, so they'd take half the list.
 const recentQuery = (accountId: string, logicalCardId: number) =>
-  activitiesQuery(accountId, { ...activitiesParams(logicalCardId, {}), limit: "5" });
+  activitiesQuery(accountId, { ...activitiesParams(logicalCardId, { hideFees: true }), limit: "5" });
 
 function LogicalCardPage() {
   const { accountId, logicalCardId } = Route.useParams();

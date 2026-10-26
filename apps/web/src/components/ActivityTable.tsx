@@ -1,4 +1,4 @@
-import { Badge, ColorSwatch, Group, Stack, Table, Text, Tooltip } from "@mantine/core";
+import { Badge, ColorSwatch, Group, Table, Text, Tooltip } from "@mantine/core";
 import type { Activity, ActivityKind, Card, LogicalCard } from "../api.ts";
 import {
   ACTIVITY_KIND_LABELS,
@@ -7,14 +7,13 @@ import {
   formatMoney,
   lastFour,
 } from "../lib/format.ts";
-import { FLOW_GROUPS, groupOf } from "../lib/spending.ts";
+import { groupColor } from "../lib/spending.ts";
 
 /**
  * An activity's kind, drawn like the spending chart's toggles: its group's colour dot, then the kind. So the same
  * colour means the same thing on the chart and in the ledger.
  */
 export function KindTag({ kind }: { kind: ActivityKind }) {
-  const group = FLOW_GROUPS.find((g) => g.key === groupOf(kind));
   return (
     <Badge
       variant="default"
@@ -23,14 +22,7 @@ export function KindTag({ kind }: { kind: ActivityKind }) {
       fw={500}
       fz="xs"
       h={22}
-      leftSection={
-        // "red.6" is the theme's var(--mantine-color-red-6).
-        <ColorSwatch
-          color={`var(--mantine-color-${group?.color.replace(".", "-")})`}
-          size={8}
-          withShadow={false}
-        />
-      }
+      leftSection={<ColorSwatch color={groupColor(kind)} size={8} withShadow={false} />}
     >
       {ACTIVITY_KIND_LABELS[kind]}
     </Badge>
@@ -138,22 +130,16 @@ export function ActivityTable({
                 key={a.id}
                 onClick={() => onOpen(a.id)}
                 bg={a.id === selectedId ? "var(--mantine-color-blue-light)" : undefined}
-                // Top-aligned, so every cell lines up with the description rather than its reserved second line.
-                style={{ cursor: "pointer", verticalAlign: "top" }}
+                style={{ cursor: "pointer" }}
               >
                 <Table.Td style={{ whiteSpace: "nowrap" }}>
                   <Text size="sm">{formatDateTime(a.occurredAt)}</Text>
                 </Table.Td>
                 <Table.Td>
-                  <Stack gap={0}>
-                    <Text size="sm" lineClamp={1}>
-                      {a.description}
-                    </Text>
-                    {/* Always takes its line, so every row, and so the table, has the same height. */}
-                    <Text size="xs" c="dimmed" lineClamp={1}>
-                      {a.postedDescription ? `Posted as ${a.postedDescription}` : "\u00a0"}
-                    </Text>
-                  </Stack>
+                  {/* One line, so every row has the same height; the drawer shows what it posted as. */}
+                  <Text size="sm" lineClamp={1}>
+                    {a.description}
+                  </Text>
                 </Table.Td>
                 <Table.Td>
                   <Group gap={4} wrap="nowrap">

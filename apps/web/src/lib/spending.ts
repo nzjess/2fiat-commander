@@ -11,9 +11,11 @@ export interface Flow {
   description: string;
 }
 
+// Colours checked for separation (OKLab ΔE): refunds were teal, too close to top-ups' green; yellow.4 keeps at
+// least 15 from every other group (its nearest is fees' orange).
 export const FLOW_GROUPS = [
   { key: "purchases", label: "Purchases", color: "red.6", kinds: ["purchase"] },
-  { key: "refunds", label: "Refunds", color: "teal.5", kinds: ["refund"] },
+  { key: "refunds", label: "Refunds", color: "yellow.4", kinds: ["refund"] },
   { key: "fees", label: "Fees", color: "orange.5", kinds: ["fee"] },
   { key: "topups", label: "Top-ups", color: "green.6", kinds: ["topup", "card_issue"] },
   { key: "transfers", label: "Transfers", color: "violet.5", kinds: ["transfer_in", "transfer_out"] },
@@ -25,6 +27,20 @@ export type GroupKey = (typeof FLOW_GROUPS)[number]["key"];
 /** The group an activity kind belongs to; unknown kinds are "other". */
 export function groupOf(kind: string): GroupKey {
   return FLOW_GROUPS.find((g) => (g.kinds as readonly string[]).includes(kind))?.key ?? "other";
+}
+
+/** A group's colour as CSS: "red.6" is the theme's var(--mantine-color-red-6). */
+export function groupColor(kind: string): string {
+  const color = FLOW_GROUPS.find((g) => g.key === groupOf(kind))?.color ?? "gray.6";
+  return `var(--mantine-color-${color.replace(".", "-")})`;
+}
+
+/** The given kinds under their groups' labels, groups in display order, leaving out groups with none. */
+export function kindsByGroup(kinds: readonly string[]): { group: string; kinds: string[] }[] {
+  return FLOW_GROUPS.map((g) => ({
+    group: g.label,
+    kinds: kinds.filter((k) => groupOf(k) === g.key),
+  })).filter((g) => g.kinds.length > 0);
 }
 
 /** The groups the flows fall into, in display order. */
