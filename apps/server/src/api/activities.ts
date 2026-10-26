@@ -1,6 +1,6 @@
 import { zValidator } from "@hono/zod-validator";
 import { LOOKBACK_DAYS } from "@twofiat/client";
-import { and, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, notInArray, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import {
@@ -71,6 +71,8 @@ const ListQuery = z.object({
   findingId: z.coerce.number().int().positive().optional(),
   /** Comma-separated. */
   kind: z.string().transform(list).optional(),
+  /** Comma-separated kinds to leave out, e.g. `fee`. */
+  excludeKind: z.string().transform(list).optional(),
   status: z.string().transform(list).optional(),
   /** occurred_at from this time (inclusive) up to `to` (exclusive). */
   from: z.iso.datetime().optional(),
@@ -122,6 +124,9 @@ export function activityRoutes(deps: AppDeps) {
                 ? undefined
                 : sql`${activities.id} IN (SELECT value FROM ${findings}, json_each(${findings.activityIds}) WHERE ${findings.id} = ${query.findingId})`,
               query.kind?.length ? inArray(activities.kind, query.kind as ActivityRow["kind"][]) : undefined,
+              query.excludeKind?.length
+                ? notInArray(activities.kind, query.excludeKind as ActivityRow["kind"][])
+                : undefined,
               query.status?.length
                 ? inArray(activities.status, query.status as ActivityRow["status"][])
                 : undefined,

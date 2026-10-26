@@ -88,7 +88,7 @@ function Accounts() {
                       <Group gap="xs" justify="flex-end" wrap="nowrap">
                         <Button
                           size="compact-sm"
-                          variant="subtle"
+                          variant="light"
                           onClick={() => setDialog({ kind: "rename", account: a })}
                         >
                           Rename
@@ -96,7 +96,7 @@ function Accounts() {
                         {a.archivedAt === null && (
                           <Button
                             size="compact-sm"
-                            variant="subtle"
+                            variant="light"
                             color="orange"
                             onClick={() => setDialog({ kind: "replace", account: a })}
                           >

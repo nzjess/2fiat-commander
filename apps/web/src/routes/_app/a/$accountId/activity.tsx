@@ -153,7 +153,10 @@ function Filters({
           placeholder={search.kind ? undefined : "All kinds"}
           data={Object.entries(ACTIVITY_KIND_LABELS).map(([value, label]) => ({ value, label }))}
           value={split(search.kind)}
-          onChange={(values) => update({ kind: join(values) })}
+          // Choosing fees shows them again.
+          onChange={(values) =>
+            update({ kind: join(values), ...(values.includes("fee") && { hideFees: undefined }) })
+          }
           clearable
         />
         <MultiSelect
@@ -186,6 +189,20 @@ function Filters({
           label="Stale holds only"
           checked={search.stale === true}
           onChange={(e) => update({ stale: e.currentTarget.checked || undefined })}
+        />
+        <Switch
+          size="xs"
+          mb={6}
+          label="Hide fees"
+          checked={search.hideFees === true}
+          onChange={(e) =>
+            update(
+              e.currentTarget.checked
+                ? // Hidden fees can't also be chosen.
+                  { hideFees: true, kind: join(split(search.kind).filter((k) => k !== "fee")) }
+                : { hideFees: undefined },
+            )
+          }
         />
       </Group>
       {search.finding !== undefined && (

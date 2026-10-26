@@ -17,14 +17,13 @@ import type { ReactNode } from "react";
 import type { ActivityDetail, Card, LogicalCard } from "../api.ts";
 import {
   ACTIVITY_FLAG_LABELS,
-  ACTIVITY_KIND_LABELS,
   cardLabel,
   FINDING_KIND_LABELS,
   formatDateTime,
   formatMoney,
 } from "../lib/format.ts";
 import { activityQuery, findingsQuery } from "../queries.ts";
-import { ActivityAmount, ActivityStatusBadge, isOwnTransfer } from "./ActivityTable.tsx";
+import { ActivityAmount, ActivityStatusBadge, isOwnTransfer, KindTag } from "./ActivityTable.tsx";
 import { AnchorLink } from "./links.tsx";
 import { ErrorView } from "./status.tsx";
 
@@ -79,7 +78,7 @@ function Details({
           <ActivityAmount activity={a} size="lg" />
         </Group>
         <Group gap="xs">
-          <Badge variant="light">{ACTIVITY_KIND_LABELS[a.kind]}</Badge>
+          <KindTag kind={a.kind} />
           <ActivityStatusBadge activity={a} />
           {a.flags.map((flag) => (
             <Tooltip key={flag} label={ACTIVITY_FLAG_LABELS[flag].description} multiline maw={280}>

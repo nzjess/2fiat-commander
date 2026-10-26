@@ -1,6 +1,6 @@
 import { Badge, Button, Group, Paper, Stack, Text, Textarea } from "@mantine/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { api, type Card, type Finding, type LogicalCard, ok } from "../api.ts";
 import { FINDING_KIND_LABELS, formatDate, formatMoney, lastFour } from "../lib/format.ts";
 import { activityQuery } from "../queries.ts";
@@ -142,21 +142,24 @@ function FindingItem({
             </>
           )}
         </Text>
-        <Explanation accountId={accountId} finding={finding} />
-        {canAdjust && (
-          <>
-            <Group>
-              <Button size="compact-xs" variant="subtle" onClick={() => openAdjustment(suggested.draft)}>
+        <Explanation
+          accountId={accountId}
+          finding={finding}
+          action={
+            canAdjust && (
+              <Button size="compact-xs" variant="light" onClick={() => openAdjustment(suggested.draft)}>
                 {suggested.label}
               </Button>
-            </Group>
-            <AdjustmentModal
-              accountId={accountId}
-              cards={[card]}
-              draft={adjustment && { ...adjustment, cardId: card.id }}
-              onClose={() => setAdjustment(null)}
-            />
-          </>
+            )
+          }
+        />
+        {canAdjust && (
+          <AdjustmentModal
+            accountId={accountId}
+            cards={[card]}
+            draft={adjustment && { ...adjustment, cardId: card.id }}
+            onClose={() => setAdjustment(null)}
+          />
         )}
       </Stack>
     </Paper>
@@ -179,8 +182,16 @@ function adjustmentFor(finding: Finding): { label: string; draft: AdjustmentDraf
   return undefined;
 }
 
-/** The user's note on why a finding is fine, edited in place. */
-function Explanation({ accountId, finding }: { accountId: string; finding: Finding }) {
+/** The user's note on why a finding is fine, edited in place. `action` shares the line of its buttons. */
+function Explanation({
+  accountId,
+  finding,
+  action,
+}: {
+  accountId: string;
+  finding: Finding;
+  action?: ReactNode;
+}) {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<string | null>(null);
   const save = useMutation({
@@ -230,10 +241,11 @@ function Explanation({ accountId, finding }: { accountId: string; finding: Findi
   }
   if (finding.explanation === null) {
     return (
-      <Group>
-        <Button size="compact-xs" variant="subtle" onClick={() => setDraft("")}>
+      <Group gap="xs">
+        <Button size="compact-xs" variant="light" onClick={() => setDraft("")}>
           Explain
         </Button>
+        {action}
       </Group>
     );
   }
@@ -242,12 +254,13 @@ function Explanation({ accountId, finding }: { accountId: string; finding: Findi
       <Text size="sm" fs="italic" style={{ flex: 1, whiteSpace: "pre-wrap" }}>
         {finding.explanation}
       </Text>
-      <Button size="compact-xs" variant="subtle" onClick={() => setDraft(finding.explanation ?? "")}>
+      {action}
+      <Button size="compact-xs" variant="light" onClick={() => setDraft(finding.explanation ?? "")}>
         Edit
       </Button>
       <Button
         size="compact-xs"
-        variant="subtle"
+        variant="light"
         color="red"
         loading={save.isPending}
         onClick={() => save.mutate(null)}

@@ -261,12 +261,12 @@ export function AdjustmentList({
                     <Table.Td>
                       {!readOnly && (
                         <Group gap={4} justify="flex-end" wrap="nowrap">
-                          <Button size="compact-xs" variant="subtle" onClick={() => setDraft(a)}>
+                          <Button size="compact-xs" variant="light" onClick={() => setDraft(a)}>
                             Edit
                           </Button>
                           <Button
                             size="compact-xs"
-                            variant="subtle"
+                            variant="light"
                             color="red"
                             loading={remove.isPending && remove.variables?.id === a.id}
                             onClick={() => remove.mutate(a)}

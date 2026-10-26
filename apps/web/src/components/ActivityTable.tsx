@@ -1,5 +1,5 @@
-import { Badge, Group, Stack, Table, Text, Tooltip } from "@mantine/core";
-import type { Activity, Card, LogicalCard } from "../api.ts";
+import { Badge, ColorSwatch, Group, Stack, Table, Text, Tooltip } from "@mantine/core";
+import type { Activity, ActivityKind, Card, LogicalCard } from "../api.ts";
 import {
   ACTIVITY_KIND_LABELS,
   ACTIVITY_STATUS_LABELS,
@@ -7,6 +7,35 @@ import {
   formatMoney,
   lastFour,
 } from "../lib/format.ts";
+import { FLOW_GROUPS, groupOf } from "../lib/spending.ts";
+
+/**
+ * An activity's kind, drawn like the spending chart's toggles: its group's colour dot, then the kind. So the same
+ * colour means the same thing on the chart and in the ledger.
+ */
+export function KindTag({ kind }: { kind: ActivityKind }) {
+  const group = FLOW_GROUPS.find((g) => g.key === groupOf(kind));
+  return (
+    <Badge
+      variant="default"
+      radius="xl"
+      tt="none"
+      fw={500}
+      fz="xs"
+      h={22}
+      leftSection={
+        // "red.6" is the theme's var(--mantine-color-red-6).
+        <ColorSwatch
+          color={`var(--mantine-color-${group?.color.replace(".", "-")})`}
+          size={8}
+          withShadow={false}
+        />
+      }
+    >
+      {ACTIVITY_KIND_LABELS[kind]}
+    </Badge>
+  );
+}
 
 /** A transfer between two physical cards of the same logical card: money moved within the card, not in or out. */
 export const isOwnTransfer = (activity: Pick<Activity, "counterpartCardId">, logical: LogicalCard) =>
@@ -128,9 +157,7 @@ export function ActivityTable({
                 </Table.Td>
                 <Table.Td>
                   <Group gap={4} wrap="nowrap">
-                    <Text size="sm" style={{ whiteSpace: "nowrap" }}>
-                      {ACTIVITY_KIND_LABELS[a.kind]}
-                    </Text>
+                    <KindTag kind={a.kind} />
                     {isOwnTransfer(a, logical) && (
                       <Tooltip label="Between this card's own physical cards: money moved within the card">
                         <Badge size="xs" variant="outline" color="gray">

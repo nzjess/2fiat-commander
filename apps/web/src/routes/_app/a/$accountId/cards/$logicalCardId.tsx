@@ -244,7 +244,7 @@ function Name({ accountId, logical }: { accountId: string; logical: LogicalCard 
     return (
       <Group gap="xs">
         <Title order={2}>{logical.name}</Title>
-        <Button size="compact-sm" variant="subtle" onClick={() => setName(logical.name)}>
+        <Button size="compact-sm" variant="light" onClick={() => setName(logical.name)}>
           Rename
         </Button>
       </Group>
@@ -408,7 +408,7 @@ function PhysicalCards({
                 {!card.isCurrent && (
                   <Button
                     size="compact-xs"
-                    variant="subtle"
+                    variant="light"
                     loading={makeCurrent.isPending && makeCurrent.variables === card.id}
                     onClick={() => makeCurrent.mutate(card.id)}
                   >
@@ -417,7 +417,7 @@ function PhysicalCards({
                 )}
                 <Button
                   size="compact-xs"
-                  variant="subtle"
+                  variant="light"
                   color="gray"
                   loading={separate.isPending && separate.variables === card.id}
                   onClick={() => separate.mutate(card.id)}
@@ -482,7 +482,7 @@ function OpeningBalance({ accountId, card, readOnly }: { accountId: string; card
           <>
             <Button
               size="compact-xs"
-              variant="subtle"
+              variant="light"
               onClick={() => setDraft(opening ? (opening.cents / 100).toFixed(2) : "")}
             >
               {opening ? "Change" : "Enter"}
@@ -490,7 +490,7 @@ function OpeningBalance({ accountId, card, readOnly }: { accountId: string; card
             {opening?.source === "entered" && (
               <Button
                 size="compact-xs"
-                variant="subtle"
+                variant="light"
                 color="gray"
                 loading={save.isPending}
                 onClick={() => save.mutate(null)}

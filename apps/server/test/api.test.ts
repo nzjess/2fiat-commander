@@ -518,6 +518,8 @@ describe("activities", () => {
     const query = async (q: Record<string, string>) =>
       (await ok(activities.$get({ param: s.param, query: q }))).items.map((a) => a.description);
     expect(await query({ kind: "fee,card_issue" })).toHaveLength(2);
+    expect(await query({ excludeKind: "fee" })).toHaveLength(all.items.length - 1);
+    expect(await query({ kind: "fee,card_issue", excludeKind: "fee" })).toHaveLength(1);
     expect(await query({ q: "cafe" })).toEqual(["CAFE SPRINGFIELD USA"]);
     expect(await query({ q: "%" })).toEqual([]);
     expect(await query({ stale: "true" })).toEqual(["KIOSK SPRINGFIELD USA"]);

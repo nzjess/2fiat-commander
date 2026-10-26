@@ -60,6 +60,8 @@ export interface ActivitySearch {
   q?: string;
   /** Only holds that never posted. */
   stale?: true;
+  /** Leave fee rows out: each purchase has one, so they double the list. */
+  hideFees?: true;
   /** Only the activities this finding points at. */
   finding?: number;
   /** Rows a page; absent means `DEFAULT_PAGE_SIZE`. */
@@ -90,6 +92,7 @@ export function parseActivitySearch(raw: Record<string, unknown>): ActivitySearc
     to: localDate(raw.to),
     q: q || undefined,
     stale: raw.stale === true || raw.stale === "true" ? true : undefined,
+    hideFees: raw.hideFees === true || raw.hideFees === "true" ? true : undefined,
     finding: positiveInt(raw.finding),
     size: PAGE_SIZES.find((n) => n === positiveInt(raw.size) && n !== DEFAULT_PAGE_SIZE),
     activity: positiveInt(raw.activity),
@@ -107,6 +110,7 @@ export function activitiesParams(logicalCardId: number, search: ActivitySearch):
     to: search.to && localDayStart(search.to, 1),
     q: search.q,
     stale: search.stale && "true",
+    excludeKind: search.hideFees && "fee",
     findingId: search.finding === undefined ? undefined : String(search.finding),
     limit: String(search.size ?? DEFAULT_PAGE_SIZE),
   };

@@ -121,6 +121,7 @@ describe("search params", () => {
         to: "2026-02-30",
         q: "  cafe ",
         stale: true,
+        hideFees: "true",
         finding: 9,
         activity: "41",
       }),
@@ -131,6 +132,7 @@ describe("search params", () => {
       from: "2026-10-01",
       q: "cafe",
       stale: true,
+      hideFees: true,
       finding: 9,
       activity: 41,
     });
@@ -154,6 +156,7 @@ describe("search params", () => {
         to: "2026-10-26",
         q: "cafe",
         stale: true,
+        hideFees: true,
         finding: 9,
         size: 100,
         activity: 41,
@@ -166,6 +169,7 @@ describe("search params", () => {
       to: localDayStart("2026-10-27"),
       q: "cafe",
       stale: "true",
+      excludeKind: "fee",
       findingId: "9",
       limit: "100",
     });
