@@ -2,9 +2,9 @@ import { Group, SegmentedControl, Select, Stack, Title } from "@mantine/core";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { FindingList } from "../../../../components/FindingList.tsx";
-import { cardLabel, FINDING_KIND_LABELS } from "../../../../lib/format.ts";
+import { FINDING_KIND_LABELS } from "../../../../lib/format.ts";
 import { FINDING_STATUSES, type FindingStatus, parseFindingsSearch } from "../../../../lib/search.ts";
-import { accountQuery, cardsQuery, findingsQuery } from "../../../../queries.ts";
+import { accountQuery, cardsQuery, findingsQuery, logicalCardsQuery } from "../../../../queries.ts";
 
 export const Route = createFileRoute("/_app/a/$accountId/findings")({
   validateSearch: parseFindingsSearch,
@@ -12,6 +12,7 @@ export const Route = createFileRoute("/_app/a/$accountId/findings")({
   loader: ({ context: { queryClient }, params: { accountId }, deps }) =>
     Promise.all([
       queryClient.ensureQueryData(cardsQuery(accountId)),
+      queryClient.ensureQueryData(logicalCardsQuery(accountId)),
       queryClient.ensureQueryData(findingsQuery(accountId, deps)),
     ]),
   component: Findings,
@@ -23,6 +24,7 @@ function Findings() {
   const navigate = Route.useNavigate();
   const { data: account } = useSuspenseQuery(accountQuery(accountId));
   const { data: cards } = useSuspenseQuery(cardsQuery(accountId));
+  const { data: logicalCards } = useSuspenseQuery(logicalCardsQuery(accountId));
   const { data: findings } = useSuspenseQuery(findingsQuery(accountId, search));
 
   return (
@@ -47,10 +49,10 @@ function Findings() {
           w={220}
           placeholder="All cards"
           clearable
-          data={cards.map((c) => ({ value: String(c.id), label: cardLabel(c) }))}
-          value={search.cardId === undefined ? null : String(search.cardId)}
+          data={logicalCards.map((l) => ({ value: String(l.id), label: l.name }))}
+          value={search.card === undefined ? null : String(search.card)}
           onChange={(value) =>
-            navigate({ search: (prev) => ({ ...prev, cardId: value ? Number(value) : undefined }) })
+            navigate({ search: (prev) => ({ ...prev, card: value ? Number(value) : undefined }) })
           }
         />
         <Select
@@ -67,6 +69,7 @@ function Findings() {
         accountId={accountId}
         findings={findings}
         cards={cards}
+        logicalCards={logicalCards}
         readOnly={account.archivedAt !== null}
       />
     </Stack>

@@ -82,7 +82,7 @@ function Nav({ accountId, onNavigate }: { accountId: string | undefined; onNavig
             label="Overview"
             active={
               !!matchRoute({ to: "/a/$accountId", params: { accountId } }) ||
-              !!matchRoute({ to: "/a/$accountId/cards/$cardId", params: { accountId }, fuzzy: true })
+              !!matchRoute({ to: "/a/$accountId/cards/$logicalCardId", params: { accountId }, fuzzy: true })
             }
             onClick={onNavigate}
           />

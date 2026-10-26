@@ -2,6 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { and, asc, eq, gte, inArray, notExists, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
+import { balanceHistory } from "../balanceHistory.ts";
 import type { Db, Executor } from "../db/db.ts";
 import { balanceSnapshots, cards, evaluations, logicalCards, openingBalances } from "../db/schema.ts";
 import { reevaluate } from "../reevaluate.ts";
@@ -281,6 +282,12 @@ export function cardRoutes(deps: AppDeps) {
           return c.json(logicalCardDtos(db, accountId).find((l) => l.id === id));
         },
       )
+      // A logical card's running ledger balance, and what 2fiat reported along the way.
+      .get("/logical-cards/:logicalCardId/balance-history", (c) => {
+        const history = balanceHistory(db, c.var.account.id, idParam(c, "logicalCardId", "logical card"));
+        if (!history) throw notFound("logical card");
+        return c.json(history);
+      })
       // Each card's balances at every evaluation, oldest first: when a gap appeared, and how it moved.
       .get(
         "/snapshots",
@@ -288,12 +295,14 @@ export function cardRoutes(deps: AppDeps) {
           "query",
           z.object({
             cardId: z.coerce.number().int().positive().optional(),
+            /** The snapshots of all its physical cards. */
+            logicalCardId: z.coerce.number().int().positive().optional(),
             from: z.iso.datetime().optional(),
           }),
           invalid,
         ),
         (c) => {
-          const { cardId, from } = c.req.valid("query");
+          const { cardId, logicalCardId, from } = c.req.valid("query");
           const rows = db
             .select({ snapshot: balanceSnapshots, asOf: evaluations.asOf })
             .from(balanceSnapshots)
@@ -302,6 +311,12 @@ export function cardRoutes(deps: AppDeps) {
               and(
                 eq(evaluations.accountId, c.var.account.id),
                 cardId === undefined ? undefined : eq(balanceSnapshots.cardId, cardId),
+                logicalCardId === undefined
+                  ? undefined
+                  : inArray(
+                      balanceSnapshots.cardId,
+                      db.select({ id: cards.id }).from(cards).where(eq(cards.logicalCardId, logicalCardId)),
+                    ),
                 from === undefined ? undefined : gte(evaluations.asOf, from),
               ),
             )

@@ -1,13 +1,22 @@
-import { Alert, Button, Group, Modal, Stack, Table, Text, Textarea, TextInput } from "@mantine/core";
+import { Alert, Button, Group, Modal, Select, Stack, Table, Text, Textarea, TextInput } from "@mantine/core";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { type Adjustment, api, ok, send } from "../api.ts";
-import { formatDate, formatMoney, isoToLocalDate, localDateToIso, toCents } from "../lib/format.ts";
+import { type Adjustment, api, type Card, ok, send } from "../api.ts";
+import {
+  cardLabel,
+  formatDate,
+  formatMoney,
+  isoToLocalDate,
+  localDateToIso,
+  toCents,
+} from "../lib/format.ts";
 import { adjustmentsQuery } from "../queries.ts";
 
 /** What the form starts with: an adjustment to edit, or a suggestion such as a gap's amount. */
 export interface AdjustmentDraft {
   id?: number;
+  /** The physical card the money moved on: fixed when set, else the user picks (the current card first). */
+  cardId?: number;
   cents?: number;
   occurredAt?: string;
   note?: string;
@@ -23,14 +32,13 @@ export interface AdjustmentDraft {
  */
 export function AdjustmentModal({
   accountId,
-  cardId,
-  currency,
+  cards,
   draft,
   onClose,
 }: {
   accountId: string;
-  cardId: number;
-  currency: string;
+  /** The physical cards it can be on, the current one first. */
+  cards: Card[];
   /** Opens the modal when set. */
   draft: AdjustmentDraft | null;
   onClose: () => void;
@@ -41,33 +49,28 @@ export function AdjustmentModal({
       onClose={onClose}
       title={draft?.id === undefined ? "Record an adjustment" : "Edit adjustment"}
     >
-      {draft && (
-        <AdjustmentForm
-          accountId={accountId}
-          cardId={cardId}
-          currency={currency}
-          draft={draft}
-          onDone={onClose}
-        />
-      )}
+      {draft && <AdjustmentForm accountId={accountId} cards={cards} draft={draft} onDone={onClose} />}
     </Modal>
   );
 }
 
 function AdjustmentForm({
   accountId,
-  cardId,
-  currency,
+  cards,
   draft,
   onDone,
 }: {
   accountId: string;
-  cardId: number;
-  currency: string;
+  cards: Card[];
   draft: AdjustmentDraft;
   onDone: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [cardId, setCardId] = useState(draft.cardId ?? cards[0]?.id);
+  const card = cards.find((c) => c.id === cardId);
+  const currency = card?.currency ?? "USD";
+  // Only a new adjustment, not tied to a finding, can choose its card.
+  const chooseCard = draft.id === undefined && draft.cardId === undefined && cards.length > 1;
   const [amount, setAmount] = useState(draft.cents === undefined ? "" : (draft.cents / 100).toFixed(2));
   const [date, setDate] = useState(isoToLocalDate(draft.occurredAt ?? new Date().toISOString()));
   const [note, setNote] = useState(draft.note ?? "");
@@ -84,7 +87,7 @@ function AdjustmentForm({
       const created = await ok(
         endpoint.$post({
           param: { accountId },
-          json: { cardId, topupActivityId: draft.topupActivityId, ...json },
+          json: { cardId: cardId ?? 0, topupActivityId: draft.topupActivityId, ...json },
         }),
       );
       // The finding this came from is explained by the same note, even once the adjustment resolves it.
@@ -103,7 +106,12 @@ function AdjustmentForm({
       onDone();
     },
   });
-  const valid = cents !== undefined && cents !== 0 && occurredAt !== undefined && note.trim() !== "";
+  const valid =
+    card !== undefined &&
+    cents !== undefined &&
+    cents !== 0 &&
+    occurredAt !== undefined &&
+    note.trim() !== "";
 
   return (
     <form
@@ -124,6 +132,23 @@ function AdjustmentForm({
           <Alert color="red" variant="light">
             {save.error.message}
           </Alert>
+        )}
+        {chooseCard ? (
+          <Select
+            label="Card"
+            description="The physical card the money moved on"
+            data={cards.map((c) => ({ value: String(c.id), label: cardLabel(c) }))}
+            value={cardId === undefined ? null : String(cardId)}
+            allowDeselect={false}
+            onChange={(v) => v && setCardId(Number(v))}
+          />
+        ) : (
+          card &&
+          cards.length > 1 && (
+            <Text size="sm">
+              On <b>{cardLabel(card)}</b>
+            </Text>
+          )
         )}
         <TextInput
           label="Amount"
@@ -168,20 +193,25 @@ function AdjustmentForm({
   );
 }
 
-/** A card's adjustments, oldest first, with editing unless the account is archived. */
+/**
+ * A logical card's adjustments, oldest first, with editing unless the account is archived. Each is on one of its
+ * physical cards, named when it has more than one.
+ */
 export function AdjustmentList({
   accountId,
-  cardId,
-  currency,
+  logicalCardId,
+  cards,
   readOnly,
 }: {
   accountId: string;
-  cardId: number;
-  currency: string;
+  logicalCardId: number;
+  /** Its physical cards, the current one first. */
+  cards: Card[];
   readOnly: boolean;
 }) {
   const queryClient = useQueryClient();
-  const { data: adjustments } = useSuspenseQuery(adjustmentsQuery(accountId, cardId));
+  const { data: adjustments } = useSuspenseQuery(adjustmentsQuery(accountId, logicalCardId));
+  const byId = new Map(cards.map((c) => [c.id, c]));
   const [draft, setDraft] = useState<AdjustmentDraft | null>(null);
   const remove = useMutation({
     mutationFn: (a: Adjustment) =>
@@ -206,44 +236,51 @@ export function AdjustmentList({
                 <Table.Th>Date</Table.Th>
                 <Table.Th ta="right">Amount</Table.Th>
                 <Table.Th>Note</Table.Th>
+                {cards.length > 1 && <Table.Th>Card</Table.Th>}
                 <Table.Th />
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {adjustments.map((a) => (
-                <Table.Tr key={a.id}>
-                  <Table.Td style={{ whiteSpace: "nowrap" }}>{formatDate(a.occurredAt)}</Table.Td>
-                  <Table.Td ta="right" style={{ whiteSpace: "nowrap" }}>
-                    {formatMoney(a.cents, currency, { signed: true })}
-                  </Table.Td>
-                  <Table.Td style={{ whiteSpace: "pre-wrap" }}>
-                    {a.note}
-                    {a.order && (
-                      <Text size="xs" c="dimmed">
-                        Completes the top-up of {formatDate(a.order.createdAt)}
-                      </Text>
+              {adjustments.map((a) => {
+                const card = byId.get(a.cardId);
+                return (
+                  <Table.Tr key={a.id}>
+                    <Table.Td style={{ whiteSpace: "nowrap" }}>{formatDate(a.occurredAt)}</Table.Td>
+                    <Table.Td ta="right" style={{ whiteSpace: "nowrap" }}>
+                      {formatMoney(a.cents, card?.currency ?? "USD", { signed: true })}
+                    </Table.Td>
+                    <Table.Td style={{ whiteSpace: "pre-wrap" }}>
+                      {a.note}
+                      {a.order && (
+                        <Text size="xs" c="dimmed">
+                          Completes the top-up of {formatDate(a.order.createdAt)}
+                        </Text>
+                      )}
+                    </Table.Td>
+                    {cards.length > 1 && (
+                      <Table.Td style={{ whiteSpace: "nowrap" }}>{card ? cardLabel(card) : ""}</Table.Td>
                     )}
-                  </Table.Td>
-                  <Table.Td>
-                    {!readOnly && (
-                      <Group gap={4} justify="flex-end" wrap="nowrap">
-                        <Button size="compact-xs" variant="subtle" onClick={() => setDraft(a)}>
-                          Edit
-                        </Button>
-                        <Button
-                          size="compact-xs"
-                          variant="subtle"
-                          color="red"
-                          loading={remove.isPending && remove.variables?.id === a.id}
-                          onClick={() => remove.mutate(a)}
-                        >
-                          Delete
-                        </Button>
-                      </Group>
-                    )}
-                  </Table.Td>
-                </Table.Tr>
-              ))}
+                    <Table.Td>
+                      {!readOnly && (
+                        <Group gap={4} justify="flex-end" wrap="nowrap">
+                          <Button size="compact-xs" variant="subtle" onClick={() => setDraft(a)}>
+                            Edit
+                          </Button>
+                          <Button
+                            size="compact-xs"
+                            variant="subtle"
+                            color="red"
+                            loading={remove.isPending && remove.variables?.id === a.id}
+                            onClick={() => remove.mutate(a)}
+                          >
+                            Delete
+                          </Button>
+                        </Group>
+                      )}
+                    </Table.Td>
+                  </Table.Tr>
+                );
+              })}
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>
@@ -260,13 +297,7 @@ export function AdjustmentList({
           </Button>
         </Group>
       )}
-      <AdjustmentModal
-        accountId={accountId}
-        cardId={cardId}
-        currency={currency}
-        draft={draft}
-        onClose={() => setDraft(null)}
-      />
+      <AdjustmentModal accountId={accountId} cards={cards} draft={draft} onClose={() => setDraft(null)} />
     </Stack>
   );
 }

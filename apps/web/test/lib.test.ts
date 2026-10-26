@@ -79,14 +79,14 @@ describe("dates", () => {
 describe("search params", () => {
   test("keeps only well-formed findings filters", () => {
     expect(parseFindingsSearch({})).toEqual({});
-    expect(parseFindingsSearch({ status: "resolved", cardId: 3, kind: "balance-gap" })).toEqual({
+    expect(parseFindingsSearch({ status: "resolved", card: 3, kind: "balance-gap" })).toEqual({
       status: "resolved",
-      cardId: 3,
+      card: 3,
       kind: "balance-gap",
     });
     // "open" is the default, so it stays out of the URL.
-    expect(parseFindingsSearch({ status: "open", cardId: "7" })).toEqual({ cardId: 7 });
-    expect(parseFindingsSearch({ status: "nope", cardId: -1, kind: "x;y" })).toEqual({});
+    expect(parseFindingsSearch({ status: "open", card: "7" })).toEqual({ card: 7 });
+    expect(parseFindingsSearch({ status: "nope", card: -1, kind: "x;y" })).toEqual({});
     expect(parseFindingsSearch({ status: "explained" })).toEqual({ status: "explained" });
   });
 

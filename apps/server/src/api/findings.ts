@@ -39,6 +39,8 @@ const ListQuery = z.object({
    */
   status: z.enum(["open", "explained", "resolved", "all"]).default("open"),
   cardId: z.coerce.number().int().positive().optional(),
+  /** The findings of all its physical cards. */
+  logicalCardId: z.coerce.number().int().positive().optional(),
   /** Comma-separated. */
   kind: z
     .string()
@@ -68,7 +70,7 @@ export function findingRoutes(deps: AppDeps) {
     new Hono<AccountEnv>()
       // Most recently seen first.
       .get("/findings", zValidator("query", ListQuery, invalid), (c) => {
-        const { status, cardId, kind } = c.req.valid("query");
+        const { status, cardId, logicalCardId, kind } = c.req.valid("query");
         return c.json(
           selectFindings(db)
             .where(
@@ -82,6 +84,7 @@ export function findingRoutes(deps: AppDeps) {
                   : undefined,
                 status === "resolved" ? isNotNull(findings.resolvedEvaluationId) : undefined,
                 cardId === undefined ? undefined : eq(findings.cardId, cardId),
+                logicalCardId === undefined ? undefined : eq(cards.logicalCardId, logicalCardId),
                 kind?.length
                   ? inArray(findings.kind, kind as (typeof findings.$inferSelect)["kind"][])
                   : undefined,

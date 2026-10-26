@@ -36,10 +36,15 @@ export const logicalCardsQuery = (accountId: string) =>
     queryFn: () => ok(account["logical-cards"].$get({ param: { accountId } })),
   });
 
-export const snapshotsQuery = (accountId: string, cardId: number) =>
+export const balanceHistoryQuery = (accountId: string, logicalCardId: number) =>
   queryOptions({
-    queryKey: ["accounts", accountId, "snapshots", cardId],
-    queryFn: () => ok(account.snapshots.$get({ param: { accountId }, query: { cardId: String(cardId) } })),
+    queryKey: ["accounts", accountId, "balance-history", logicalCardId],
+    queryFn: () =>
+      ok(
+        account["logical-cards"][":logicalCardId"]["balance-history"].$get({
+          param: { accountId, logicalCardId: String(logicalCardId) },
+        }),
+      ),
   });
 
 export const activityQuery = (accountId: string, activityId: number) =>
@@ -49,10 +54,11 @@ export const activityQuery = (accountId: string, activityId: number) =>
       ok(account.activities[":activityId"].$get({ param: { accountId, activityId: String(activityId) } })),
   });
 
-export const adjustmentsQuery = (accountId: string, cardId: number) =>
+export const adjustmentsQuery = (accountId: string, logicalCardId: number) =>
   queryOptions({
-    queryKey: ["accounts", accountId, "adjustments", cardId],
-    queryFn: () => ok(account.adjustments.$get({ param: { accountId }, query: { cardId: String(cardId) } })),
+    queryKey: ["accounts", accountId, "adjustments", logicalCardId],
+    queryFn: () =>
+      ok(account.adjustments.$get({ param: { accountId }, query: { logicalCardId: String(logicalCardId) } })),
   });
 
 export const findingsQuery = (accountId: string, search: FindingsSearch) =>
@@ -64,7 +70,7 @@ export const findingsQuery = (accountId: string, search: FindingsSearch) =>
           param: { accountId },
           query: {
             status: search.status ?? "open",
-            ...(search.cardId === undefined ? {} : { cardId: String(search.cardId) }),
+            ...(search.card === undefined ? {} : { logicalCardId: String(search.card) }),
             ...(search.kind === undefined ? {} : { kind: search.kind }),
           },
         }),

@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import {
@@ -10,7 +10,7 @@ import {
   updateAdjustment,
 } from "../adjustments.ts";
 import type { Db } from "../db/db.ts";
-import { adjustments, rawOrders } from "../db/schema.ts";
+import { adjustments, cards, rawOrders } from "../db/schema.ts";
 import { reevaluate } from "../reevaluate.ts";
 import { type AccountEnv, type AppDeps, idParam, invalid } from "./common.ts";
 
@@ -60,9 +60,17 @@ export function adjustmentRoutes(deps: AppDeps) {
       // Oldest first.
       .get(
         "/adjustments",
-        zValidator("query", z.object({ cardId: z.coerce.number().int().positive().optional() }), invalid),
+        zValidator(
+          "query",
+          z.object({
+            cardId: z.coerce.number().int().positive().optional(),
+            /** The adjustments of all its physical cards. */
+            logicalCardId: z.coerce.number().int().positive().optional(),
+          }),
+          invalid,
+        ),
         (c) => {
-          const { cardId } = c.req.valid("query");
+          const { cardId, logicalCardId } = c.req.valid("query");
           return c.json(
             db
               .select()
@@ -71,6 +79,12 @@ export function adjustmentRoutes(deps: AppDeps) {
                 and(
                   eq(adjustments.accountId, c.var.account.id),
                   cardId === undefined ? undefined : eq(adjustments.cardId, cardId),
+                  logicalCardId === undefined
+                    ? undefined
+                    : inArray(
+                        adjustments.cardId,
+                        db.select({ id: cards.id }).from(cards).where(eq(cards.logicalCardId, logicalCardId)),
+                      ),
                 ),
               )
               .orderBy(asc(adjustments.occurredAt), asc(adjustments.id))

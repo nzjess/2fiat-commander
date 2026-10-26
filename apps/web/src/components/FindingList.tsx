@@ -1,26 +1,30 @@
 import { Badge, Button, Group, Paper, Stack, Text, Textarea } from "@mantine/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, type Card, type Finding, ok } from "../api.ts";
-import { cardLabel, FINDING_KIND_LABELS, formatDate, formatMoney } from "../lib/format.ts";
+import { api, type Card, type Finding, type LogicalCard, ok } from "../api.ts";
+import { FINDING_KIND_LABELS, formatDate, formatMoney, lastFour } from "../lib/format.ts";
 import { activityQuery } from "../queries.ts";
 import { type AdjustmentDraft, AdjustmentModal } from "./Adjustments.tsx";
 import { AnchorLink } from "./links.tsx";
 
 /**
  * Reconciliation findings, each with its card, when it was seen, and the user's explanation. A balance gap can be
- * closed by recording the adjustment that explains it.
+ * closed by recording the adjustment that explains it. A finding is about one physical card, since 2fiat reports
+ * balances per physical card: it shows under its logical card, naming the physical one when there are several.
  */
 export function FindingList({
   accountId,
   findings,
   cards,
+  logicalCards,
   showCard = true,
   readOnly = false,
 }: {
   accountId: string;
   findings: Finding[];
   cards: Card[];
+  logicalCards: LogicalCard[];
+  /** Name the logical card on each finding (off on a logical card's own page). */
   showCard?: boolean;
   readOnly?: boolean;
 }) {
@@ -32,6 +36,7 @@ export function FindingList({
     );
   }
   const byId = new Map(cards.map((c) => [c.id, c]));
+  const logicalById = new Map(logicalCards.map((l) => [l.id, l]));
   return (
     <Stack gap="sm">
       {findings.map((f) => (
@@ -40,6 +45,7 @@ export function FindingList({
           accountId={accountId}
           finding={f}
           card={byId.get(f.cardId)}
+          logical={logicalById.get(byId.get(f.cardId)?.logicalCardId ?? 0)}
           showCard={showCard}
           readOnly={readOnly}
         />
@@ -52,12 +58,14 @@ function FindingItem({
   accountId,
   finding,
   card,
+  logical,
   showCard,
   readOnly,
 }: {
   accountId: string;
   finding: Finding;
   card: Card | undefined;
+  logical: LogicalCard | undefined;
   showCard: boolean;
   readOnly: boolean;
 }) {
@@ -93,14 +101,19 @@ function FindingItem({
                 Explained
               </Badge>
             )}
-            {showCard && card && (
+            {showCard && logical && (
               <AnchorLink
-                to="/a/$accountId/cards/$cardId"
-                params={{ accountId, cardId: String(card.id) }}
+                to="/a/$accountId/cards/$logicalCardId"
+                params={{ accountId, logicalCardId: String(logical.id) }}
                 size="sm"
               >
-                {cardLabel(card)}
+                {logical.name}
               </AnchorLink>
+            )}
+            {card && logical && logical.cardIds.length > 1 && (
+              <Text size="xs" c="dimmed">
+                on ·· {lastFour(card.maskedNumber)}
+              </Text>
             )}
           </Group>
           {finding.cents !== null && card && (
@@ -128,9 +141,8 @@ function FindingItem({
             </Group>
             <AdjustmentModal
               accountId={accountId}
-              cardId={card.id}
-              currency={card.currency}
-              draft={adjustment}
+              cards={[card]}
+              draft={adjustment && { ...adjustment, cardId: card.id }}
               onClose={() => setAdjustment(null)}
             />
           </>

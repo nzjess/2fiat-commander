@@ -340,6 +340,66 @@ describe("cards and balances", () => {
     expect((await move(999)).status).toBe(404);
   });
 
+  test("a logical card's balance runs over all its cards, from their opening balances", async () => {
+    const s = await synced();
+    const cards = await s.cardsByTwofiatId();
+    const [a, b] = [cards.get(CARD_A), cards.get(CARD_B)];
+    // B (inherited, opening $120) becomes part of A's logical card.
+    await ok(
+      s.account.cards[":cardId"].$patch({
+        param: { ...s.param, cardId: String(b?.id) },
+        json: { logicalCardId: a?.logicalCardId ?? 0 },
+      }),
+    );
+    const param = { ...s.param, logicalCardId: String(a?.logicalCardId) };
+    const history = await ok(s.account["logical-cards"][":logicalCardId"]["balance-history"].$get({ param }));
+
+    expect(history.currency).toBe("USD");
+    const at = history.points.map((p) => p.at);
+    expect(at).toEqual([...at].sort());
+    // It ends at the two ledgers' sum: A's $12.50 and B's $100.
+    expect(history.points.at(-1)?.cents).toBe(11_250);
+    // B's opening balance comes in just before B's first activity.
+    const opening = history.points.findIndex((p) => p.openingCardId === b?.id);
+    expect(history.points[opening]).toMatchObject({
+      cents: (history.points[opening - 1]?.cents ?? 0) + 12_000,
+    });
+    expect(history.points[opening + 1]?.activity).toMatchObject({ cardId: b?.id, amountCents: -2000 });
+    expect(history.points.filter((p) => p.openingCardId !== null)).toHaveLength(1);
+    expect(history.reported).toEqual([{ at: "2026-10-20T12:00:00.000Z", cents: 11_250 }]);
+
+    // The logical card's findings, snapshots and adjustments span both cards.
+    const query = { logicalCardId: param.logicalCardId };
+    const snapshots = await ok(s.account.snapshots.$get({ param: s.param, query }));
+    expect(new Set(snapshots.map((x) => x.cardId))).toEqual(new Set([a?.id, b?.id]));
+    const findings = await ok(s.account.findings.$get({ param: s.param, query }));
+    expect(findings.map((f) => f.kind)).toContain("stale-authorization");
+    await ok(
+      s.account.adjustments.$post({
+        param: s.param,
+        json: { cardId: b?.id ?? 0, cents: 100, occurredAt: "2026-10-20T13:00:00.000Z", note: "x" },
+      }),
+    );
+    expect((await ok(s.account.adjustments.$get({ param: s.param, query }))).map((x) => x.cardId)).toEqual([
+      b?.id,
+    ]);
+    const other = await ok(
+      s.account.findings.$get({
+        param: s.param,
+        query: { logicalCardId: String((a?.logicalCardId ?? 0) + 99) },
+      }),
+    );
+    expect(other).toEqual([]);
+
+    expect(
+      (
+        await s.account["logical-cards"][":logicalCardId"]["balance-history"].$get({
+          param: { ...s.param, logicalCardId: "999" },
+        })
+      ).status,
+    ).toBe(404);
+  });
+
   test("keeps exactly one current card per logical card", async () => {
     const s = await synced();
     // B replaces A: issued later.

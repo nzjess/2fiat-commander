@@ -8,7 +8,8 @@ export type FindingStatus = (typeof FINDING_STATUSES)[number];
 export interface FindingsSearch {
   /** Absent means open. */
   status?: FindingStatus;
-  cardId?: number;
+  /** A logical card. */
+  card?: number;
   kind?: string;
 }
 
@@ -20,11 +21,11 @@ export function positiveInt(value: unknown): number | undefined {
 
 export function parseFindingsSearch(raw: Record<string, unknown>): FindingsSearch {
   const status = FINDING_STATUSES.find((s) => s === raw.status && s !== "open");
-  const cardId = positiveInt(raw.cardId);
+  const card = positiveInt(raw.card);
   const kind = typeof raw.kind === "string" && /^[a-z-]+$/.test(raw.kind) ? raw.kind : undefined;
   return {
     ...(status && { status }),
-    ...(cardId !== undefined && { cardId }),
+    ...(card !== undefined && { card }),
     ...(kind !== undefined && { kind }),
   };
 }
