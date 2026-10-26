@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { csrf } from "hono/csrf";
 import { accountRoutes, accountScopedRoutes } from "./api/accounts.ts";
 import { activityRoutes } from "./api/activities.ts";
+import { adjustmentRoutes } from "./api/adjustments.ts";
 import { authRoutes } from "./api/auth.ts";
 import { cardRoutes } from "./api/cards.ts";
 import { type AppDeps, handleError, loadAccount, requireUser } from "./api/common.ts";
@@ -29,6 +30,7 @@ export function createApp(deps: AppDeps) {
       .route("/accounts/:accountId", cardRoutes(deps))
       .route("/accounts/:accountId", activityRoutes(deps))
       .route("/accounts/:accountId", findingRoutes(deps))
+      .route("/accounts/:accountId", adjustmentRoutes(deps))
   );
 }
 

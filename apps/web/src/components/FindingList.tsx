@@ -3,19 +3,26 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type Card, type Finding, ok } from "../api.ts";
 import { cardLabel, FINDING_KIND_LABELS, formatDate, formatMoney } from "../lib/format.ts";
+import { activityQuery } from "../queries.ts";
+import { type AdjustmentDraft, AdjustmentModal } from "./Adjustments.tsx";
 import { AnchorLink } from "./links.tsx";
 
-/** Reconciliation findings, each with its card, when it was seen, and the user's explanation. */
+/**
+ * Reconciliation findings, each with its card, when it was seen, and the user's explanation. A balance gap can be
+ * closed by recording the adjustment that explains it.
+ */
 export function FindingList({
   accountId,
   findings,
   cards,
   showCard = true,
+  readOnly = false,
 }: {
   accountId: string;
   findings: Finding[];
   cards: Card[];
   showCard?: boolean;
+  readOnly?: boolean;
 }) {
   if (findings.length === 0) {
     return (
@@ -34,6 +41,7 @@ export function FindingList({
           finding={f}
           card={byId.get(f.cardId)}
           showCard={showCard}
+          readOnly={readOnly}
         />
       ))}
     </Stack>
@@ -45,13 +53,28 @@ function FindingItem({
   finding,
   card,
   showCard,
+  readOnly,
 }: {
   accountId: string;
   finding: Finding;
   card: Card | undefined;
   showCard: boolean;
+  readOnly: boolean;
 }) {
   const resolved = finding.resolvedAt !== null;
+  const [adjustment, setAdjustment] = useState<AdjustmentDraft | null>(null);
+  const queryClient = useQueryClient();
+  // A top-up's missing credit starts on the order's date; if the top-up can't be fetched, on today's.
+  const openAdjustment = async (draft: AdjustmentDraft) => {
+    if (draft.topupActivityId === undefined) return setAdjustment(draft);
+    const topup = await queryClient
+      .fetchQuery(activityQuery(accountId, draft.topupActivityId))
+      .catch(() => undefined);
+    setAdjustment({ ...draft, occurredAt: topup?.occurredAt });
+  };
+  // A gap, or a top-up's missing credit, can be made good with an adjustment: the money 2fiat moved with no row.
+  const suggested = adjustmentFor(finding);
+  const canAdjust = !readOnly && !resolved && suggested && card;
   return (
     <Paper withBorder p="sm" radius="md" opacity={resolved ? 0.75 : 1}>
       <Stack gap={6}>
@@ -96,9 +119,41 @@ function FindingItem({
             ` · ${finding.activityIds.length} ${finding.activityIds.length === 1 ? "activity" : "activities"}`}
         </Text>
         <Explanation accountId={accountId} finding={finding} />
+        {canAdjust && (
+          <>
+            <Group>
+              <Button size="compact-xs" variant="subtle" onClick={() => openAdjustment(suggested.draft)}>
+                {suggested.label}
+              </Button>
+            </Group>
+            <AdjustmentModal
+              accountId={accountId}
+              cardId={card.id}
+              currency={card.currency}
+              draft={adjustment}
+              onClose={() => setAdjustment(null)}
+            />
+          </>
+        )}
       </Stack>
     </Paper>
   );
+}
+
+/** The adjustment that would make good a finding, if one can: a gap's amount, or a top-up's missing credit. */
+function adjustmentFor(finding: Finding): { label: string; draft: AdjustmentDraft } | undefined {
+  if (finding.cents === null) return undefined;
+  if (finding.kind === "balance-gap") {
+    return { label: "Record an adjustment", draft: { cents: finding.cents, findingId: finding.id } };
+  }
+  const topupActivityId = finding.activityIds[0];
+  if (finding.kind === "credit-shortfall" && topupActivityId !== undefined) {
+    return {
+      label: "Record the missing credit",
+      draft: { cents: -finding.cents, topupActivityId, findingId: finding.id },
+    };
+  }
+  return undefined;
 }
 
 /** The user's note on why a finding is fine, edited in place. */

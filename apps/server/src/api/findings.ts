@@ -33,8 +33,11 @@ function selectFindings(db: Db) {
 }
 
 const ListQuery = z.object({
-  /** Open findings (the default) are the ones the latest evaluation still saw. Explained ones are open too. */
-  status: z.enum(["open", "resolved", "all"]).default("open"),
+  /**
+   * Unresolved findings are the ones the latest evaluation still saw: `open` (the default) are those the user
+   * hasn't explained yet, `explained` the rest. `resolved` ones the data no longer shows.
+   */
+  status: z.enum(["open", "explained", "resolved", "all"]).default("open"),
   cardId: z.coerce.number().int().positive().optional(),
   /** Comma-separated. */
   kind: z
@@ -71,7 +74,12 @@ export function findingRoutes(deps: AppDeps) {
             .where(
               and(
                 eq(cards.accountId, c.var.account.id),
-                status === "open" ? isNull(findings.resolvedEvaluationId) : undefined,
+                status === "open"
+                  ? and(isNull(findings.resolvedEvaluationId), isNull(findings.explanation))
+                  : undefined,
+                status === "explained"
+                  ? and(isNull(findings.resolvedEvaluationId), isNotNull(findings.explanation))
+                  : undefined,
                 status === "resolved" ? isNotNull(findings.resolvedEvaluationId) : undefined,
                 cardId === undefined ? undefined : eq(findings.cardId, cardId),
                 kind?.length

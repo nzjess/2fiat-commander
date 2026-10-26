@@ -42,6 +42,19 @@ export const snapshotsQuery = (accountId: string, cardId: number) =>
     queryFn: () => ok(account.snapshots.$get({ param: { accountId }, query: { cardId: String(cardId) } })),
   });
 
+export const activityQuery = (accountId: string, activityId: number) =>
+  queryOptions({
+    queryKey: ["accounts", accountId, "activities", activityId],
+    queryFn: () =>
+      ok(account.activities[":activityId"].$get({ param: { accountId, activityId: String(activityId) } })),
+  });
+
+export const adjustmentsQuery = (accountId: string, cardId: number) =>
+  queryOptions({
+    queryKey: ["accounts", accountId, "adjustments", cardId],
+    queryFn: () => ok(account.adjustments.$get({ param: { accountId }, query: { cardId: String(cardId) } })),
+  });
+
 export const findingsQuery = (accountId: string, search: FindingsSearch) =>
   queryOptions({
     queryKey: ["accounts", accountId, "findings", search],

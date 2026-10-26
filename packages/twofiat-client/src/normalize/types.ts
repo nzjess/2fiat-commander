@@ -18,7 +18,12 @@ export type ActivityKind =
   | "transfer_in"
   | "declined"
   | "verification"
-  | "other";
+  | "other"
+  /**
+   * Money 2fiat moved without any row to show for it (e.g. a balance support credited by hand), entered by the
+   * user. `normalize` never produces it: the app derives it from the user's entry.
+   */
+  | "adjustment";
 
 /**
  * For card payments, 2fiat's row statuses are misleading: a COMPLETED authorisation row is the approval at purchase

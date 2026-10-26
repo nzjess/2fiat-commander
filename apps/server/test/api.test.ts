@@ -1,4 +1,4 @@
-import { authorization, CARD_A, CARD_B, card } from "@twofiat/client/fixtures";
+import { authorization, CARD_A, CARD_B, card, order } from "@twofiat/client/fixtures";
 import { eq } from "drizzle-orm";
 import { type ClientResponse, hc } from "hono/client";
 import type { SuccessStatusCode } from "hono/utils/http-status";
@@ -7,6 +7,8 @@ import { type App, createApp } from "../src/app.ts";
 import { createUser, hashPassword } from "../src/auth.ts";
 import { openDb } from "../src/db/db.ts";
 import { accounts, cards as cardsTable, sessions, syncs } from "../src/db/schema.ts";
+import { markForRebuild } from "../src/ledger.ts";
+import { reevaluate } from "../src/reevaluate.ts";
 import { Secrets } from "../src/secrets.ts";
 import { SyncRunner } from "../src/sync.ts";
 import { fake2fiat } from "./fake-2fiat.ts";
@@ -439,6 +441,166 @@ describe("activities", () => {
   });
 });
 
+describe("adjustments", () => {
+  test("an adjustment closes a gap without a sync, and survives a full rebuild", async () => {
+    const s = await synced();
+    // 2fiat's support credits card A $5 by hand: no row says so.
+    s.twofiat.state.cards[0] = card({ id: CARD_A, balance: 17.5 });
+    s.clock.now = new Date("2026-10-21T12:00:00.000Z");
+    await s.runner.sync(s.accountId, "manual");
+    const cardA = async () => (await s.cardsByTwofiatId()).get(CARD_A);
+    const a = await cardA();
+    expect(a?.balance?.gapCents).toBe(500);
+    s.twofiat.calls.length = 0;
+
+    const adjustments = s.account.adjustments;
+    const created = await ok(
+      adjustments.$post({
+        param: s.param,
+        json: {
+          cardId: a?.id ?? 0,
+          cents: 500,
+          occurredAt: "2026-10-21T09:00:00.000Z",
+          note: "Support credit",
+        },
+      }),
+    );
+    expect(created).toMatchObject({ cardId: a?.id, cents: 500, occurredAt: "2026-10-21T09:00:00.000Z" });
+    expect(s.twofiat.calls).toEqual([]);
+    expect((await cardA())?.balance).toMatchObject({ ledgerCents: 1750, gapCents: 0 });
+    expect(await ok(s.account.findings.$get({ param: s.param, query: { kind: "balance-gap" } }))).toEqual([]);
+
+    const adjustmentActivities = async () =>
+      (await ok(s.account.activities.$get({ param: s.param, query: { kind: "adjustment" } }))).items;
+    expect(await adjustmentActivities()).toMatchObject([
+      { id: created.activityId, amountCents: 500, status: "settled", description: "Support credit" },
+    ]);
+    const activityParam = { ...s.param, activityId: String(created.activityId) };
+    const detail = await ok(s.account.activities[":activityId"].$get({ param: activityParam }));
+    expect(detail.sources).toMatchObject({ transactions: [], orders: [], adjustment: { id: created.id } });
+
+    // A full rebuild re-normalises every raw row, and leaves the adjustment's activity as it was.
+    markForRebuild(s.db, s.accountId);
+    reevaluate(s.db, s.accountId, s.clock.now);
+    expect((await adjustmentActivities()).map((x) => x.id)).toEqual([created.activityId]);
+    expect((await cardA())?.balance?.gapCents).toBe(0);
+
+    const param = { ...s.param, adjustmentId: String(created.id) };
+    await ok(adjustments[":adjustmentId"].$patch({ param, json: { cents: 300 } }));
+    expect((await cardA())?.balance?.gapCents).toBe(200);
+    expect((await adjustments[":adjustmentId"].$delete({ param })).status).toBe(204);
+    expect((await cardA())?.balance?.gapCents).toBe(500);
+    expect((await s.account.activities[":activityId"].$get({ param: activityParam })).status).toBe(404);
+    expect(await ok(adjustments.$get({ param: s.param, query: {} }))).toEqual([]);
+
+    expect(
+      (
+        await adjustments.$post({
+          param: s.param,
+          json: { cardId: a?.id ?? 0, cents: 0, occurredAt: created.occurredAt, note: "x" },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await adjustments.$post({
+          param: s.param,
+          json: { cardId: 999, cents: 1, occurredAt: created.occurredAt, note: "x" },
+        })
+      ).status,
+    ).toBe(404);
+    expect((await adjustments[":adjustmentId"].$delete({ param })).status).toBe(404);
+  });
+
+  test("one that completes a short top-up settles both the gap and the shortfall", async () => {
+    const s = await synced();
+    // A $100 top-up paid short, so 2fiat credited a cent; support credited the rest by hand, with no row.
+    const short = order({ card: CARD_A, at: "2026-10-15T10:00:00.000Z", amount: 100, credited: "0.01" });
+    s.twofiat.state.orders.push(short);
+    s.twofiat.state.cards[0] = card({ id: CARD_A, balance: 112.5 });
+    await s.runner.sync(s.accountId, "manual");
+    const open = async () =>
+      (
+        await ok(s.account.findings.$get({ param: s.param, query: { kind: "balance-gap,credit-shortfall" } }))
+      ).map((f) => [f.kind, f.cents]);
+    expect(await open()).toEqual(
+      expect.arrayContaining([
+        ["balance-gap", 9999],
+        ["credit-shortfall", -9999],
+      ]),
+    );
+    const shortfall = (
+      await ok(s.account.findings.$get({ param: s.param, query: { kind: "credit-shortfall" } }))
+    )[0];
+    const a = (await s.cardsByTwofiatId()).get(CARD_A);
+    const fields = { cardId: a?.id ?? 0, occurredAt: "2026-10-16T09:00:00.000Z", note: "Support made it up" };
+
+    // Naming a top-up that isn't one is refused.
+    const notTopup = (await ok(s.account.activities.$get({ param: s.param, query: { kind: "purchase" } })))
+      .items[0];
+    expect(
+      (
+        await s.account.adjustments.$post({
+          param: s.param,
+          json: { ...fields, cents: 9999, topupActivityId: notTopup?.id ?? 0 },
+        })
+      ).status,
+    ).toBe(404);
+
+    const created = await ok(
+      s.account.adjustments.$post({
+        param: s.param,
+        json: { ...fields, cents: 9999, topupActivityId: shortfall?.activityIds[0] ?? 0 },
+      }),
+    );
+    expect(created.order).toMatchObject({ twofiatId: short.id });
+    expect(await open()).toEqual([]);
+    expect((await s.cardsByTwofiatId()).get(CARD_A)?.balance?.gapCents).toBe(0);
+  });
+
+  test("one from before an inferred opening balance moves the opening, not the gap", async () => {
+    // Card B's opening balance was inferred as $120 at the first sync, on the 20th at noon.
+    const s = await synced();
+    const cardB = async () => (await s.cardsByTwofiatId()).get(CARD_B);
+    const b = await cardB();
+    const add = (cents: number, occurredAt: string) =>
+      ok(
+        s.account.adjustments.$post({
+          param: s.param,
+          json: { cardId: b?.id ?? 0, cents, occurredAt, note: "x" },
+        }),
+      );
+
+    // Money moved before the inference was already in the inferred opening: it moves out of it.
+    const early = await add(2000, "2026-10-01T00:00:00.000Z");
+    expect(await cardB()).toMatchObject({
+      openingBalance: { cents: 10_000, source: "inferred" },
+      balance: { ledgerCents: 10_000, gapCents: 0 },
+    });
+    // Money moved after it is new: it shows in the gap.
+    await add(-1000, "2026-10-20T13:00:00.000Z");
+    expect(await cardB()).toMatchObject({ openingBalance: { cents: 10_000 }, balance: { gapCents: 1000 } });
+    // Moving the early one past the inference gives its money back to the opening.
+    await ok(
+      s.account.adjustments[":adjustmentId"].$patch({
+        param: { ...s.param, adjustmentId: String(early.id) },
+        json: { occurredAt: "2026-10-20T14:00:00.000Z" },
+      }),
+    );
+    expect(await cardB()).toMatchObject({ openingBalance: { cents: 12_000 }, balance: { gapCents: -1000 } });
+
+    // An opening balance the user entered is theirs: adjustments never move it.
+    await ok(
+      s.account.cards[":cardId"]["opening-balance"].$put({
+        param: { ...s.param, cardId: String(b?.id) },
+        json: { cents: 12_000 },
+      }),
+    );
+    await add(500, "2026-10-01T00:00:00.000Z");
+    expect((await cardB())?.openingBalance).toMatchObject({ cents: 12_000, source: "entered" });
+  });
+});
+
 describe("findings", () => {
   test("lists open findings, marks one explained, and shows resolved ones", async () => {
     const s = await synced();
@@ -456,6 +618,11 @@ describe("findings", () => {
       await findings[":findingId"].$patch({ param, json: { explanation: "a kiosk hold" } })
     ).json();
     expect(explained).toMatchObject({ explanation: "a kiosk hold", explainedAt: "2026-10-20T12:00:00.000Z" });
+    // Explained findings leave the open list for their own, until the data resolves them.
+    const ids = async (status?: "explained") =>
+      (await ok(findings.$get({ param: s.param, query: status ? { status } : {} }))).map((f) => f.id);
+    expect(await ids()).not.toContain(stale?.id);
+    expect(await ids("explained")).toEqual([stale?.id]);
     const unexplained = await (
       await findings[":findingId"].$patch({ param, json: { explanation: null } })
     ).json();

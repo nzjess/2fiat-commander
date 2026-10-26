@@ -75,3 +75,4 @@ export type LogicalCard = Body<AccountApi["logical-cards"]["$get"]>[number];
 export type Snapshot = Body<AccountApi["snapshots"]["$get"]>[number];
 export type Finding = Body<AccountApi["findings"]["$get"]>[number];
 export type FindingKind = Finding["kind"];
+export type Adjustment = Body<AccountApi["adjustments"]["$get"]>[number];

@@ -15,6 +15,7 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { api, type Card, type LogicalCard, ok, type Snapshot, send } from "../../../../../api.ts";
+import { AdjustmentList } from "../../../../../components/Adjustments.tsx";
 import { CardFace } from "../../../../../components/CardFace.tsx";
 import { FindingList } from "../../../../../components/FindingList.tsx";
 import { AnchorLink } from "../../../../../components/links.tsx";
@@ -31,6 +32,7 @@ import {
 import { positiveInt } from "../../../../../lib/search.ts";
 import {
   accountQuery,
+  adjustmentsQuery,
   cardsQuery,
   findingsQuery,
   logicalCardsQuery,
@@ -46,6 +48,7 @@ export const Route = createFileRoute("/_app/a/$accountId/cards/$cardId")({
       queryClient.ensureQueryData(logicalCardsQuery(accountId)),
       queryClient.ensureQueryData(snapshotsQuery(accountId, id)),
       queryClient.ensureQueryData(findingsQuery(accountId, { cardId: id })),
+      queryClient.ensureQueryData(adjustmentsQuery(accountId, id)),
     ]);
     if (!cards.some((c) => c.id === id)) throw notFound();
   },
@@ -96,6 +99,10 @@ function CardPage() {
         <OpeningBalance accountId={accountId} card={card} readOnly={readOnly} />
       </Section>
 
+      <Section title="Adjustments">
+        <AdjustmentList accountId={accountId} cardId={card.id} currency={card.currency} readOnly={readOnly} />
+      </Section>
+
       <Section title="Same card over time">
         <Grouping
           accountId={accountId}
@@ -119,7 +126,13 @@ function CardPage() {
           </AnchorLink>
         }
       >
-        <FindingList accountId={accountId} findings={findings} cards={cards} showCard={false} />
+        <FindingList
+          accountId={accountId}
+          findings={findings}
+          cards={cards}
+          showCard={false}
+          readOnly={readOnly}
+        />
       </Section>
     </Stack>
   );

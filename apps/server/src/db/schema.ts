@@ -223,7 +223,39 @@ export const activities = sqliteTable(
   ],
 );
 
-/** Which raw rows make up each activity. Every raw row belongs to exactly one activity. */
+/**
+ * Money 2fiat moved without a row, entered by the user: e.g. a balance support credited by hand. Each one is the
+ * source of one `adjustment` activity, so the ledger and analytics include it like any other activity. 2fiat's raw
+ * tables never hold these.
+ */
+export const adjustments = sqliteTable(
+  "adjustments",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    accountId: integer("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    cardId: integer("card_id")
+      .notNull()
+      .references(() => cards.id, { onDelete: "cascade" }),
+    /** Signed: positive is money added to the card. */
+    cents: integer().notNull(),
+    /** When the money moved, as the user says. */
+    occurredAt: text("occurred_at").notNull(),
+    note: text().notNull(),
+    /** The order this credit completes (e.g. a top-up paid short and made up by support), if any. */
+    rawOrderId: integer("raw_order_id").references(() => rawOrders.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: text("updated_at")
+      .notNull()
+      .$defaultFn(() => now()),
+  },
+  (t) => [index("adjustments_card").on(t.cardId)],
+);
+
+/**
+ * What makes up each activity: raw rows, or the user's adjustment. Every raw row belongs to exactly one activity.
+ */
 export const activitySources = sqliteTable(
   "activity_sources",
   {
@@ -237,10 +269,16 @@ export const activitySources = sqliteTable(
     rawOrderId: integer("raw_order_id")
       .unique()
       .references(() => rawOrders.id, { onDelete: "cascade" }),
+    adjustmentId: integer("adjustment_id")
+      .unique()
+      .references(() => adjustments.id, { onDelete: "cascade" }),
   },
   (t) => [
     index("activity_sources_activity").on(t.activityId),
-    check("activity_sources_one_source", sql`(${t.rawTransactionId} IS NULL) <> (${t.rawOrderId} IS NULL)`),
+    check(
+      "activity_sources_one_source",
+      sql`(${t.rawTransactionId} IS NOT NULL) + (${t.rawOrderId} IS NOT NULL) + (${t.adjustmentId} IS NOT NULL) = 1`,
+    ),
   ],
 );
 

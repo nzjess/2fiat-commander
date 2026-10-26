@@ -1,7 +1,14 @@
 import { describe, expect, test } from "vitest";
 import { ApiError, apiError, isUnauthenticated } from "../src/api.ts";
 import { cardNetwork, expiryLabel } from "../src/components/CardFace.tsx";
-import { cardLabel, formatMoney, timeAgo, toCents } from "../src/lib/format.ts";
+import {
+  cardLabel,
+  formatMoney,
+  isoToLocalDate,
+  localDateToIso,
+  timeAgo,
+  toCents,
+} from "../src/lib/format.ts";
 import { parseFindingsSearch, positiveInt, safeRedirect } from "../src/lib/search.ts";
 
 describe("money", () => {
@@ -54,6 +61,21 @@ describe("cards", () => {
   });
 });
 
+describe("dates", () => {
+  test("a date input's day survives the round trip through an ISO time", () => {
+    const iso = localDateToIso("2026-09-03");
+    expect(iso).toBeDefined();
+    expect(isoToLocalDate(iso ?? "")).toBe("2026-09-03");
+    expect(new Date(iso ?? "").getHours()).toBe(12);
+  });
+
+  test("rejects what isn't a real date", () => {
+    expect(localDateToIso("2026-02-30")).toBeUndefined();
+    expect(localDateToIso("2026-13-01")).toBeUndefined();
+    expect(localDateToIso("")).toBeUndefined();
+  });
+});
+
 describe("search params", () => {
   test("keeps only well-formed findings filters", () => {
     expect(parseFindingsSearch({})).toEqual({});
@@ -65,6 +87,7 @@ describe("search params", () => {
     // "open" is the default, so it stays out of the URL.
     expect(parseFindingsSearch({ status: "open", cardId: "7" })).toEqual({ cardId: 7 });
     expect(parseFindingsSearch({ status: "nope", cardId: -1, kind: "x;y" })).toEqual({});
+    expect(parseFindingsSearch({ status: "explained" })).toEqual({ status: "explained" });
   });
 
   test("reads positive integers", () => {

@@ -67,6 +67,22 @@ export function formatMonth(iso: string | null, locale?: string): string {
   return new Date(iso).toLocaleDateString(locale, { month: "short", year: "numeric", timeZone: "UTC" });
 }
 
+/** A local date from a date input ("2026-10-26") as an ISO time: noon that day, so no time zone moves its date. */
+export function localDateToIso(date: string): string | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return undefined;
+  const [, y, m, d] = match.map(Number) as [number, number, number, number];
+  const at = new Date(y, m - 1, d, 12);
+  return at.getMonth() === m - 1 && at.getDate() === d ? at.toISOString() : undefined;
+}
+
+/** An ISO time as a date input's value, in local time. */
+export function isoToLocalDate(iso: string): string {
+  const at = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+}
+
 /** An ISO time as a local date, e.g. "26 Oct 2026". */
 export function formatDate(iso: string | null, locale?: string): string {
   if (!iso) return "—";

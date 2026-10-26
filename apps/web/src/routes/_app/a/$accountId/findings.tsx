@@ -4,7 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { FindingList } from "../../../../components/FindingList.tsx";
 import { cardLabel, FINDING_KIND_LABELS } from "../../../../lib/format.ts";
 import { FINDING_STATUSES, type FindingStatus, parseFindingsSearch } from "../../../../lib/search.ts";
-import { cardsQuery, findingsQuery } from "../../../../queries.ts";
+import { accountQuery, cardsQuery, findingsQuery } from "../../../../queries.ts";
 
 export const Route = createFileRoute("/_app/a/$accountId/findings")({
   validateSearch: parseFindingsSearch,
@@ -21,6 +21,7 @@ function Findings() {
   const { accountId } = Route.useParams();
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
+  const { data: account } = useSuspenseQuery(accountQuery(accountId));
   const { data: cards } = useSuspenseQuery(cardsQuery(accountId));
   const { data: findings } = useSuspenseQuery(findingsQuery(accountId, search));
 
@@ -62,7 +63,12 @@ function Findings() {
           onChange={(value) => navigate({ search: (prev) => ({ ...prev, kind: value ?? undefined }) })}
         />
       </Group>
-      <FindingList accountId={accountId} findings={findings} cards={cards} />
+      <FindingList
+        accountId={accountId}
+        findings={findings}
+        cards={cards}
+        readOnly={account.archivedAt !== null}
+      />
     </Stack>
   );
 }

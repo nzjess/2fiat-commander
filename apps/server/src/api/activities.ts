@@ -3,7 +3,15 @@ import { LOOKBACK_DAYS } from "@twofiat/client";
 import { and, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
-import { activities, activitySources, cards, findings, rawOrders, rawTransactions } from "../db/schema.ts";
+import {
+  activities,
+  activitySources,
+  adjustments,
+  cards,
+  findings,
+  rawOrders,
+  rawTransactions,
+} from "../db/schema.ts";
 import { daysBefore } from "../time.ts";
 import { type AccountEnv, ApiError, type AppDeps, idParam, invalid, notFound } from "./common.ts";
 
@@ -143,7 +151,7 @@ export function activityRoutes(deps: AppDeps) {
           nextCursor: rows.length > query.limit && last ? encodeCursor(last) : null,
         });
       })
-      // One activity, with 2fiat's original rows behind it and the findings that point at it.
+      // One activity, with 2fiat's original rows (or the user's adjustment) behind it and the findings that point at it.
       .get("/activities/:activityId", (c) => {
         const id = idParam(c, "activityId", "activity");
         const activity = db
@@ -181,6 +189,20 @@ export function activityRoutes(deps: AppDeps) {
           .where(eq(activitySources.activityId, id))
           .orderBy(rawOrders.createdAt, rawOrders.id)
           .all();
+        const adjustment =
+          db
+            .select({
+              id: adjustments.id,
+              cents: adjustments.cents,
+              occurredAt: adjustments.occurredAt,
+              note: adjustments.note,
+              createdAt: adjustments.createdAt,
+              updatedAt: adjustments.updatedAt,
+            })
+            .from(activitySources)
+            .innerJoin(adjustments, eq(adjustments.id, activitySources.adjustmentId))
+            .where(eq(activitySources.activityId, id))
+            .get() ?? null;
         const findingIds = db
           .select({ id: findings.id })
           .from(findings)
@@ -195,7 +217,7 @@ export function activityRoutes(deps: AppDeps) {
 
         return c.json({
           ...activityDto(activity, daysBefore(now().toISOString(), LOOKBACK_DAYS)),
-          sources: { transactions, orders },
+          sources: { transactions, orders, adjustment },
           findingIds,
         });
       })

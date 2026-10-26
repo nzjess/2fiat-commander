@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "cd0f7604-576c-4a7b-876a-ca2b6b5c02d1",
+  "id": "82e78cce-29c2-4e5a-80c0-933dc166f94d",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "accounts": {
@@ -415,6 +415,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "adjustment_id": {
+          "name": "adjustment_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -426,6 +433,11 @@
         "activity_sources_raw_order_id_unique": {
           "name": "activity_sources_raw_order_id_unique",
           "columns": ["raw_order_id"],
+          "isUnique": true
+        },
+        "activity_sources_adjustment_id_unique": {
+          "name": "activity_sources_adjustment_id_unique",
+          "columns": ["adjustment_id"],
           "isUnique": true
         },
         "activity_sources_activity": {
@@ -461,6 +473,15 @@
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "activity_sources_adjustment_id_adjustments_id_fk": {
+          "name": "activity_sources_adjustment_id_adjustments_id_fk",
+          "tableFrom": "activity_sources",
+          "tableTo": "adjustments",
+          "columnsFrom": ["adjustment_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -468,9 +489,116 @@
       "checkConstraints": {
         "activity_sources_one_source": {
           "name": "activity_sources_one_source",
-          "value": "(\"activity_sources\".\"raw_transaction_id\" IS NULL) <> (\"activity_sources\".\"raw_order_id\" IS NULL)"
+          "value": "(\"activity_sources\".\"raw_transaction_id\" IS NOT NULL) + (\"activity_sources\".\"raw_order_id\" IS NOT NULL) + (\"activity_sources\".\"adjustment_id\" IS NOT NULL) = 1"
         }
       }
+    },
+    "adjustments": {
+      "name": "adjustments",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "card_id": {
+          "name": "card_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cents": {
+          "name": "cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "raw_order_id": {
+          "name": "raw_order_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "adjustments_card": {
+          "name": "adjustments_card",
+          "columns": ["card_id"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "adjustments_account_id_accounts_id_fk": {
+          "name": "adjustments_account_id_accounts_id_fk",
+          "tableFrom": "adjustments",
+          "tableTo": "accounts",
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "adjustments_card_id_cards_id_fk": {
+          "name": "adjustments_card_id_cards_id_fk",
+          "tableFrom": "adjustments",
+          "tableTo": "cards",
+          "columnsFrom": ["card_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "adjustments_raw_order_id_raw_orders_id_fk": {
+          "name": "adjustments_raw_order_id_raw_orders_id_fk",
+          "tableFrom": "adjustments",
+          "tableTo": "raw_orders",
+          "columnsFrom": ["raw_order_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
     },
     "balance_observations": {
       "name": "balance_observations",

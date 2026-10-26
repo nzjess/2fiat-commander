@@ -1,5 +1,5 @@
 import { NORMALIZER_VERSION } from "@twofiat/client";
-import { eq, lt } from "drizzle-orm";
+import { and, eq, lt, ne } from "drizzle-orm";
 import type { Db } from "./db/db.ts";
 import { accounts, activities } from "./db/schema.ts";
 import { type EvaluateResult, evaluate } from "./evaluate.ts";
@@ -26,7 +26,8 @@ export function rebuildOutdated(db: Db, now: Date): number[] {
     .selectDistinct({ id: accounts.id })
     .from(accounts)
     .innerJoin(activities, eq(activities.accountId, accounts.id))
-    .where(lt(activities.normalizerVersion, NORMALIZER_VERSION))
+    // Adjustments come from the user, not the normaliser, so a rebuild never rewrites them.
+    .where(and(lt(activities.normalizerVersion, NORMALIZER_VERSION), ne(activities.kind, "adjustment")))
     .all()
     .map((a) => a.id);
   for (const id of outdated) {

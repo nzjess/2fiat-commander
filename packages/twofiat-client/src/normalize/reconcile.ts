@@ -128,17 +128,27 @@ export function reconcile(input: ReconcileInput): CardReconciliation[] {
       });
     }
 
+    // Credit for an order that 2fiat moved without a row (e.g. support making up a short top-up by hand), as the
+    // user recorded it: adjustments that name the order.
+    const adjustedByOrder = new Map<string, number>();
     for (const a of acts) {
+      if (a.kind === "adjustment" && a.orderId !== undefined) {
+        adjustedByOrder.set(a.orderId, (adjustedByOrder.get(a.orderId) ?? 0) + a.amountCents);
+      }
+    }
+
+    for (const a of acts) {
+      const adjusted = (a.orderId !== undefined && adjustedByOrder.get(a.orderId)) || 0;
       if (
         a.kind === "topup" &&
         a.requestedAmountCents !== undefined &&
-        a.amountCents < a.requestedAmountCents
+        a.amountCents + adjusted < a.requestedAmountCents
       ) {
         findings.push({
           kind: "credit-shortfall",
-          cents: a.amountCents - a.requestedAmountCents,
+          cents: a.amountCents + adjusted - a.requestedAmountCents,
           activityKeys: [a.key],
-          message: `A top-up for ${$(a.requestedAmountCents)} was paid but only ${$(a.amountCents)} was credited.`,
+          message: `A top-up for ${$(a.requestedAmountCents)} was paid but only ${$(a.amountCents)} was credited${adjusted ? `, and ${$(adjusted)} made up by adjustment` : ""}.`,
         });
       }
       if (a.flags.includes("credit-incomplete")) {

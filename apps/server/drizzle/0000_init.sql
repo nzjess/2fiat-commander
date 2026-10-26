@@ -61,15 +61,34 @@ CREATE TABLE `activity_sources` (
 	`activity_id` integer NOT NULL,
 	`raw_transaction_id` integer,
 	`raw_order_id` integer,
+	`adjustment_id` integer,
 	FOREIGN KEY (`activity_id`) REFERENCES `activities`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`raw_transaction_id`) REFERENCES `raw_transactions`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`raw_order_id`) REFERENCES `raw_orders`(`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "activity_sources_one_source" CHECK(("activity_sources"."raw_transaction_id" IS NULL) <> ("activity_sources"."raw_order_id" IS NULL))
+	FOREIGN KEY (`adjustment_id`) REFERENCES `adjustments`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "activity_sources_one_source" CHECK(("activity_sources"."raw_transaction_id" IS NOT NULL) + ("activity_sources"."raw_order_id" IS NOT NULL) + ("activity_sources"."adjustment_id" IS NOT NULL) = 1)
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `activity_sources_raw_transaction_id_unique` ON `activity_sources` (`raw_transaction_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `activity_sources_raw_order_id_unique` ON `activity_sources` (`raw_order_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `activity_sources_adjustment_id_unique` ON `activity_sources` (`adjustment_id`);--> statement-breakpoint
 CREATE INDEX `activity_sources_activity` ON `activity_sources` (`activity_id`);--> statement-breakpoint
+CREATE TABLE `adjustments` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`account_id` integer NOT NULL,
+	`card_id` integer NOT NULL,
+	`cents` integer NOT NULL,
+	`occurred_at` text NOT NULL,
+	`note` text NOT NULL,
+	`raw_order_id` integer,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`card_id`) REFERENCES `cards`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`raw_order_id`) REFERENCES `raw_orders`(`id`) ON UPDATE no action ON DELETE set null
+);
+--> statement-breakpoint
+CREATE INDEX `adjustments_card` ON `adjustments` (`card_id`);--> statement-breakpoint
 CREATE TABLE `balance_observations` (
 	`card_id` integer NOT NULL,
 	`sync_id` integer NOT NULL,

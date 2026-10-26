@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  type Activity,
   type Finding,
   normalize,
   productTerms,
@@ -120,6 +121,71 @@ describe("balance", () => {
       openingBalances: { [cards[0]?.id ?? ""]: 5000 },
     });
     expect(r).toMatchObject({ openingBalanceCents: undefined, gapCents: 0 });
+  });
+
+  test("an adjustment counts in the ledger, and nowhere else", () => {
+    // A top-up paid short, so 2fiat credited a cent, then support credited the rest by hand with no row.
+    const shortTopup = order({ at: "2026-10-20T10:00:00.000Z", amount: 400, credited: "0.01" });
+    const cards = [card({ balance: 420 })];
+    const activities = normalize({ transactions: [], orders: [issue, shortTopup], cards });
+    const credit: Activity = {
+      key: "adjustment:1",
+      cardId: cards[0]?.id ?? "",
+      kind: "adjustment",
+      status: "settled",
+      amountCents: 39_999,
+      currency: "USD",
+      occurredAt: "2026-10-21T00:00:00.000Z",
+      description: "Support credited the short top-up",
+      sources: { transactionIds: [], orderIds: [] },
+      flags: [],
+    };
+    const before = reconcile({ cards, transactions: [], activities });
+    const [r] = reconcile({ cards, transactions: [], activities: [...activities, credit] });
+
+    expect(r).toMatchObject({
+      ledgerBalanceCents: 42_000,
+      gapCents: 0,
+      totalsByKind: { adjustment: 39_999 },
+    });
+    expect(r?.costs).toEqual(before[0]?.costs);
+    // The order really was credited short: that stays a finding, for the user to explain.
+    expect(kinds(r?.findings ?? [])).toEqual(["credit-shortfall"]);
+    expect(kinds(before[0]?.findings ?? [])).toEqual(["balance-gap", "credit-shortfall"]);
+  });
+
+  test("an adjustment for an order makes up its credit", () => {
+    const shortTopup = order({ at: "2026-10-20T10:00:00.000Z", amount: 400, credited: "0.01" });
+    const cards = [card({ balance: 420 })];
+    const activities = normalize({ transactions: [], orders: [issue, shortTopup], cards });
+    const credit = (amountCents: number, orderId?: string): Activity => ({
+      key: `adjustment:${amountCents}`,
+      cardId: cards[0]?.id ?? "",
+      kind: "adjustment",
+      status: "settled",
+      amountCents,
+      currency: "USD",
+      occurredAt: "2026-10-21T00:00:00.000Z",
+      description: "Support credited the short top-up",
+      orderId,
+      sources: { transactionIds: [], orderIds: [] },
+      flags: [],
+    });
+    const findingsWith = (...extra: Activity[]) =>
+      reconcile({ cards, transactions: [], activities: [...activities, ...extra] })[0]?.findings ?? [];
+
+    // Linked to the order, one adjustment settles both the gap and the shortfall.
+    expect(findingsWith(credit(39_999, shortTopup.id))).toEqual([]);
+    // Short of what was missing, the rest of the shortfall stays, and so does a gap for it.
+    expect(findingsWith(credit(39_000, shortTopup.id))).toEqual([
+      expect.objectContaining({ kind: "balance-gap", cents: 999 }),
+      expect.objectContaining({
+        kind: "credit-shortfall",
+        cents: -999,
+        message:
+          "A top-up for $400.00 was paid but only $0.01 was credited, and $390.00 made up by adjustment.",
+      }),
+    ]);
   });
 });
 

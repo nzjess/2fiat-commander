@@ -1,7 +1,8 @@
 // Typed search params. The router hands over whatever the URL held (numbers already parsed from JSON), so each
 // parser keeps only well-formed values and drops the rest.
 
-export const FINDING_STATUSES = ["open", "resolved", "all"] as const;
+// Open means not explained yet; explained findings are still unresolved.
+export const FINDING_STATUSES = ["open", "explained", "resolved", "all"] as const;
 export type FindingStatus = (typeof FINDING_STATUSES)[number];
 
 export interface FindingsSearch {
