@@ -1,10 +1,12 @@
 import { Badge, Button, Group, Paper, Stack, Text, Textarea } from "@mantine/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { api, type Card, type Finding, type LogicalCard, ok } from "../api.ts";
+import { suggestExplanation } from "../lib/explanations.ts";
 import { FINDING_KIND_LABELS, formatDate, formatMoney, lastFour } from "../lib/format.ts";
 import { activityQuery } from "../queries.ts";
 import { type AdjustmentDraft, AdjustmentModal } from "./Adjustments.tsx";
+import { draftFromSuggestion, type FeeScheduleDraft, FeeScheduleModal } from "./FeeSchedules.tsx";
 import { AnchorLink } from "./links.tsx";
 
 /**
@@ -83,6 +85,20 @@ function FindingItem({
   // A gap, or a top-up's missing credit, can be made good with an adjustment: the money 2fiat moved with no row.
   const suggested = adjustmentFor(finding);
   const canAdjust = !readOnly && !resolved && suggested && card;
+  // A fee above the advert can be accepted as 2fiat's practice: then only a change in what it charges is a finding.
+  const feeKind =
+    finding.kind === "fees-above-advertised"
+      ? "transaction"
+      : finding.kind === "topup-fee-above-advertised"
+        ? "topup"
+        : undefined;
+  const canAccept = !readOnly && !resolved && feeKind && card;
+  const [feeDraft, setFeeDraft] = useState<FeeScheduleDraft | null>(null);
+  const accept = useMutation({
+    mutationFn: (query: { cardId: string; kind: "topup" | "transaction" }) =>
+      ok(api.accounts[":accountId"]["fee-schedules"].suggestion.$get({ param: { accountId }, query })),
+    onSuccess: (suggestion) => setFeeDraft(draftFromSuggestion(suggestion, finding.id)),
+  });
   return (
     <Paper withBorder p="sm" radius="md" opacity={resolved ? 0.75 : 1}>
       <Stack gap={6}>
@@ -146,13 +162,33 @@ function FindingItem({
           accountId={accountId}
           finding={finding}
           action={
-            canAdjust && (
-              <Button size="compact-xs" variant="light" onClick={() => openAdjustment(suggested.draft)}>
-                {suggested.label}
-              </Button>
-            )
+            <>
+              {canAdjust && (
+                <Button size="compact-xs" variant="light" onClick={() => openAdjustment(suggested.draft)}>
+                  {suggested.label}
+                </Button>
+              )}
+              {canAccept && (
+                <Button
+                  size="compact-xs"
+                  variant="light"
+                  loading={accept.isPending}
+                  onClick={() => accept.mutate({ cardId: String(card.id), kind: feeKind })}
+                >
+                  Accept as 2fiat's practice
+                </Button>
+              )}
+            </>
           }
         />
+        {accept.error && (
+          <Text c="red" size="sm">
+            {accept.error.message}
+          </Text>
+        )}
+        {canAccept && (
+          <FeeScheduleModal accountId={accountId} draft={feeDraft} onClose={() => setFeeDraft(null)} />
+        )}
         {canAdjust && (
           <AdjustmentModal
             accountId={accountId}
@@ -194,6 +230,8 @@ function Explanation({
 }) {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<string | null>(null);
+  // A suggestion opens selected, so typing replaces it and an arrow key or a click keeps it to amend.
+  const selectSuggestion = useRef(false);
   const save = useMutation({
     mutationFn: (explanation: string | null) =>
       ok(
@@ -219,6 +257,12 @@ function Explanation({
         <Stack gap={6}>
           <Textarea
             autoFocus
+            ref={(box) => {
+              if (box && selectSuggestion.current) {
+                selectSuggestion.current = false;
+                box.select();
+              }
+            }}
             autosize
             minRows={2}
             maxLength={2000}
@@ -242,8 +286,17 @@ function Explanation({
   if (finding.explanation === null) {
     return (
       <Group gap="xs">
-        <Button size="compact-xs" variant="light" onClick={() => setDraft("")}>
-          Explain
+        <Button
+          size="compact-xs"
+          variant="light"
+          // Starts from a likely reason, where there is one; the user edits it before saving.
+          onClick={() => {
+            const suggestion = suggestExplanation(finding);
+            selectSuggestion.current = suggestion !== undefined;
+            setDraft(suggestion ?? "");
+          }}
+        >
+          Add an explanation
         </Button>
         {action}
       </Group>

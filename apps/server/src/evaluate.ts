@@ -1,4 +1,10 @@
-import { type Activity, type CardReconciliation, reconcile } from "@twofiat/client";
+import {
+  type Activity,
+  type CardReconciliation,
+  type FeeSchedules,
+  type ReconcileInput,
+  reconcile,
+} from "@twofiat/client";
 import { and, eq, max, sql } from "drizzle-orm";
 import { type Db, type Executor, IMMEDIATE } from "./db/db.ts";
 import {
@@ -8,6 +14,7 @@ import {
   balanceSnapshots,
   cards,
   evaluations,
+  feeSchedules,
   openingBalances,
   rawTransactions,
 } from "./db/schema.ts";
@@ -51,48 +58,11 @@ export function evaluate(
     if (!account) throw new Error(`No account ${accountId}`);
     if (account.dirtyFrom !== null) throw new LedgerNotReadyError(accountId);
 
-    const observedSyncId = q
-      .select({ syncId: max(balanceObservations.syncId) })
-      .from(balanceObservations)
-      .innerJoin(cards, eq(cards.id, balanceObservations.cardId))
-      .where(eq(cards.accountId, accountId))
-      .get()?.syncId;
-    if (observedSyncId === null || observedSyncId === undefined) return undefined;
-
-    const observed = q
-      .select({ card: cards, observation: balanceObservations })
-      .from(balanceObservations)
-      .innerJoin(cards, eq(cards.id, balanceObservations.cardId))
-      .where(and(eq(cards.accountId, accountId), eq(balanceObservations.syncId, observedSyncId)))
-      .all();
-    const byTwofiatId = new Map(observed.map((o) => [o.card.twofiatId, o]));
-    // Reconcile against the observed balance, which can be newer than the stored card details.
-    const reconciledCards = observed.map(({ card, observation }) => ({
-      ...card.raw,
-      balance: observation.reportedCents / 100,
-    }));
-
-    const openings: Record<string, number> = Object.fromEntries(
-      q
-        .select({ twofiatId: cards.twofiatId, cents: openingBalances.cents })
-        .from(openingBalances)
-        .innerJoin(cards, eq(cards.id, openingBalances.cardId))
-        .where(eq(cards.accountId, accountId))
-        .all()
-        .map((o) => [o.twofiatId, o.cents]),
-    );
     const asOf = options.asOf ?? new Date().toISOString();
-    const input = {
-      cards: reconciledCards,
-      transactions: q
-        .select({ raw: rawTransactions.raw })
-        .from(rawTransactions)
-        .where(eq(rawTransactions.accountId, accountId))
-        .all()
-        .map((r) => r.raw),
-      activities: loadActivities(q, accountId),
-      asOf,
-    };
+    const loaded = loadReconcileInput(q, accountId, asOf);
+    if (!loaded) return undefined;
+    const { observedSyncId, byTwofiatId, input } = loaded;
+    const openings = { ...input.openingBalances };
 
     const evaluationId = q
       .insert(evaluations)
@@ -100,7 +70,7 @@ export function evaluate(
       .returning({ id: evaluations.id })
       .get().id;
 
-    let reconciliations = reconcile({ ...input, openingBalances: openings });
+    let reconciliations = reconcile(input);
     let inferredOpenings = 0;
     for (const rec of reconciliations) {
       const o = byTwofiatId.get(rec.cardId);
@@ -137,6 +107,81 @@ export function evaluate(
     const findings = recordFindingsIn(q, accountId, evaluationId, reconciliations);
     return { evaluationId, reconciliations, inferredOpenings, findings };
   }, IMMEDIATE);
+}
+
+/**
+ * What `reconcile` needs for an account: the cards its latest sync observed (with the balances it saw), all their
+ * rows and activities, opening balances, and accepted fee schedules. Undefined before the first sync.
+ */
+export function loadReconcileInput(q: Executor, accountId: number, asOf: string) {
+  const observedSyncId = q
+    .select({ syncId: max(balanceObservations.syncId) })
+    .from(balanceObservations)
+    .innerJoin(cards, eq(cards.id, balanceObservations.cardId))
+    .where(eq(cards.accountId, accountId))
+    .get()?.syncId;
+  if (observedSyncId === null || observedSyncId === undefined) return undefined;
+
+  const observed = q
+    .select({ card: cards, observation: balanceObservations })
+    .from(balanceObservations)
+    .innerJoin(cards, eq(cards.id, balanceObservations.cardId))
+    .where(and(eq(cards.accountId, accountId), eq(balanceObservations.syncId, observedSyncId)))
+    .all();
+  const byTwofiatId = new Map(observed.map((o) => [o.card.twofiatId, o]));
+
+  const openingCents: Record<string, number> = Object.fromEntries(
+    q
+      .select({ twofiatId: cards.twofiatId, cents: openingBalances.cents })
+      .from(openingBalances)
+      .innerJoin(cards, eq(cards.id, openingBalances.cardId))
+      .where(eq(cards.accountId, accountId))
+      .all()
+      .map((o) => [o.twofiatId, o.cents]),
+  );
+
+  // Each card gets its product's schedules.
+  const byProduct = new Map<string, Required<FeeSchedules>>();
+  for (const s of q.select().from(feeSchedules).where(eq(feeSchedules.accountId, accountId)).all()) {
+    let schedules = byProduct.get(s.product);
+    if (!schedules) {
+      schedules = { topup: [], transaction: [] };
+      byProduct.set(s.product, schedules);
+    }
+    if (s.kind === "topup" && s.rateBps !== null) {
+      schedules.topup.push({ from: s.effectiveFrom, rateBps: s.rateBps });
+    } else if (s.kind === "transaction" && s.authorizationFeeCents !== null && s.postingFeeCents !== null) {
+      schedules.transaction.push({
+        from: s.effectiveFrom,
+        authorizationCents: s.authorizationFeeCents,
+        postingCents: s.postingFeeCents,
+      });
+    }
+  }
+
+  const input: ReconcileInput & { openingBalances: Record<string, number> } = {
+    // Reconcile against the observed balance, which can be newer than the stored card details.
+    cards: observed.map(({ card, observation }) => ({
+      ...card.raw,
+      balance: observation.reportedCents / 100,
+    })),
+    transactions: q
+      .select({ raw: rawTransactions.raw })
+      .from(rawTransactions)
+      .where(eq(rawTransactions.accountId, accountId))
+      .all()
+      .map((r) => r.raw),
+    activities: loadActivities(q, accountId),
+    asOf,
+    openingBalances: openingCents,
+    feeSchedules: Object.fromEntries(
+      observed.flatMap(({ card }) => {
+        const schedules = byProduct.get(card.product);
+        return schedules ? [[card.twofiatId, schedules]] : [];
+      }),
+    ),
+  };
+  return { observedSyncId, byTwofiatId, input };
 }
 
 /** The account's stored ledger, in the shape `normalize` returns it. */

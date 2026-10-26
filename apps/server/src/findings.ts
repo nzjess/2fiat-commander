@@ -11,11 +11,16 @@ const CARD_LEVEL = new Set<FindingKind>([
   "topup-fee-above-advertised",
 ]);
 
+/** Kinds identified by a scope (e.g. the month "2026-10" of a month's fees): their fingerprint is `kind:scope`. */
+export const SCOPED_KINDS = ["transaction-fees-off-schedule"] as const satisfies FindingKind[];
+
 /**
  * A finding's identity across evaluations, within its card. Built from our stable activity ids rather than activity
- * keys, which can change when re-matching picks another anchor row.
+ * keys, which can change when re-matching picks another anchor row. A scoped finding (e.g. a month's fees) is
+ * identified by its scope, since its activities keep changing.
  */
-export function findingFingerprint(kind: FindingKind, activityIds: number[]): string {
+export function findingFingerprint(kind: FindingKind, activityIds: number[], scope?: string): string {
+  if (scope !== undefined) return `${kind}:${scope}`;
   if (CARD_LEVEL.has(kind)) return kind;
   return `${kind}:${[...activityIds].sort((a, b) => a - b).join(",")}`;
 }
@@ -79,7 +84,7 @@ export function recordFindingsIn(
         if (id === undefined) throw new Error(`Finding ${f.kind} refers to unknown activity ${key}`);
         return id;
       });
-      const fingerprint = findingFingerprint(f.kind, ids);
+      const fingerprint = findingFingerprint(f.kind, ids, f.scope);
       seen.add(fingerprint);
       const values = {
         cents: f.cents ?? null,

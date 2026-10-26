@@ -159,6 +159,23 @@ CREATE TABLE `evaluations` (
 );
 --> statement-breakpoint
 CREATE INDEX `evaluations_account` ON `evaluations` (`account_id`,`id`);--> statement-breakpoint
+CREATE TABLE `fee_schedules` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`account_id` integer NOT NULL,
+	`product` text NOT NULL,
+	`kind` text NOT NULL,
+	`effective_from` text NOT NULL,
+	`rate_bps` integer,
+	`authorization_fee_cents` integer,
+	`posting_fee_cents` integer,
+	`note` text NOT NULL,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "fee_schedules_values" CHECK(("fee_schedules"."kind" = 'topup' AND "fee_schedules"."rate_bps" IS NOT NULL AND "fee_schedules"."authorization_fee_cents" IS NULL AND "fee_schedules"."posting_fee_cents" IS NULL) OR ("fee_schedules"."kind" = 'transaction' AND "fee_schedules"."rate_bps" IS NULL AND "fee_schedules"."authorization_fee_cents" IS NOT NULL AND "fee_schedules"."posting_fee_cents" IS NOT NULL))
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `fee_schedules_start` ON `fee_schedules` (`account_id`,`product`,`kind`,`effective_from`);--> statement-breakpoint
 CREATE TABLE `findings` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`card_id` integer NOT NULL,

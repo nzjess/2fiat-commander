@@ -18,6 +18,15 @@ describe("findingFingerprint", () => {
       findingFingerprint("credit-shortfall", [9, 2]),
     );
   });
+
+  test("scoped kinds are identified by their scope, whatever their activities", () => {
+    expect(findingFingerprint("transaction-fees-off-schedule", [3, 1], "2026-10")).toBe(
+      "transaction-fees-off-schedule:2026-10",
+    );
+    expect(findingFingerprint("transaction-fees-off-schedule", [4], "2026-10")).toBe(
+      findingFingerprint("transaction-fees-off-schedule", [3, 1], "2026-10"),
+    );
+  });
 });
 
 describe("recordFindings", () => {

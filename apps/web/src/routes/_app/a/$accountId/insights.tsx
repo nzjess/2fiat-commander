@@ -4,9 +4,17 @@ import { createFileRoute } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { BalanceChart } from "../../../../components/BalanceChart.tsx";
 import { CardPageHeader } from "../../../../components/CardPageHeader.tsx";
+import { FeesPanel } from "../../../../components/FeeSchedules.tsx";
 import { SpendingChart } from "../../../../components/SpendingChart.tsx";
 import { parseInsightsSearch } from "../../../../lib/search.ts";
-import { balanceHistoryQuery, logicalCardsQuery, spendingQuery } from "../../../../queries.ts";
+import {
+  accountQuery,
+  balanceHistoryQuery,
+  feeSchedulesQuery,
+  feesQuery,
+  logicalCardsQuery,
+  spendingQuery,
+} from "../../../../queries.ts";
 
 /** Every chart, graph and table about a logical card, in one place. */
 export const Route = createFileRoute("/_app/a/$accountId/insights")({
@@ -19,6 +27,8 @@ export const Route = createFileRoute("/_app/a/$accountId/insights")({
     await Promise.all([
       queryClient.ensureQueryData(spendingQuery(accountId, id)),
       queryClient.ensureQueryData(balanceHistoryQuery(accountId, id)),
+      queryClient.ensureQueryData(feesQuery(accountId, id)),
+      queryClient.ensureQueryData(feeSchedulesQuery(accountId)),
     ]);
   },
   component: Insights,
@@ -28,6 +38,7 @@ function Insights() {
   const { accountId } = Route.useParams();
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
+  const { data: account } = useSuspenseQuery(accountQuery(accountId));
   const { data: logicalCards } = useSuspenseQuery(logicalCardsQuery(accountId));
   const logical = logicalCards.find((l) => l.id === (search.card ?? logicalCards[0]?.id));
 
@@ -48,6 +59,13 @@ function Insights() {
           </Section>
           <Section title="Balance over time">
             <BalanceChart accountId={accountId} logicalCardId={logical.id} />
+          </Section>
+          <Section title="Fees">
+            <FeesPanel
+              accountId={accountId}
+              logicalCardId={logical.id}
+              readOnly={account.archivedAt !== null}
+            />
           </Section>
         </Stack>
       ) : (

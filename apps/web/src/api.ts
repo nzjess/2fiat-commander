@@ -80,4 +80,7 @@ export type Activity = Body<AccountApi["activities"]["$get"]>["items"][number];
 export type ActivityKind = Activity["kind"];
 export type ActivityStatus = Activity["status"];
 export type ActivityFlag = Activity["flags"][number];
+export type FeeSchedule = Body<AccountApi["fee-schedules"]["$get"]>[number];
+export type FeeSuggestion = Body<AccountApi["fee-schedules"]["suggestion"]["$get"]>;
+export type CardFees = Body<AccountApi["logical-cards"][":logicalCardId"]["fees"]["$get"]>["cards"][number];
 export type ActivityDetail = Body<AccountApi["activities"][":activityId"]["$get"]>;

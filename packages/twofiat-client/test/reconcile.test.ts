@@ -251,3 +251,105 @@ test("top-up fees above the advertised rate are flagged, and costs add up", () =
     totalCents: 6250,
   });
 });
+
+describe("accepted fee schedules", () => {
+  function reconcileWith(
+    transactions: RawTransaction[],
+    orders: RawOrder[],
+    feeSchedules: Parameters<typeof reconcile>[0]["feeSchedules"],
+    asOf = "2026-11-20T00:00:00.000Z",
+  ) {
+    const cards = [card({ balance: 0 })];
+    const activities = normalize({ transactions, orders, cards });
+    const [r] = reconcile({ cards, transactions, activities, asOf, feeSchedules });
+    if (!r) throw new Error("no reconciliation");
+    return r;
+  }
+  // A purchase in a month: its authorisation and posting, and a fee for each.
+  const purchase = (day: string, feeAmount = "-0.50") => [
+    authorization({ at: `${day}T10:00:00.000Z`, amount: "-10.00", description: "SHOP SPRINGFIELD USA" }),
+    posting({ at: `${day}T20:00:00.000Z`, amount: "-10.00", description: "SHOP" }),
+    fee({ at: `${day}T12:00:01.000Z` }),
+    { ...fee({ at: `${day}T22:00:01.000Z` }), amount: feeAmount },
+  ];
+  const both = { authorizationCents: 50, postingCents: 50 };
+  const card0 = card({ balance: 0 }).id;
+
+  test("fees that match the accepted schedule raise nothing, and the advertised check stops", () => {
+    const rows = [...purchase("2026-10-01"), ...purchase("2026-11-03")];
+    const before = reconcileWith(rows, [issue], undefined);
+    expect(kinds(before.findings)).toContain("fees-above-advertised");
+
+    const r = reconcileWith(rows, [issue], {
+      [card0]: { transaction: [{ from: "2026-10-01T12:00:01.000Z", ...both }] },
+    });
+    expect(kinds(r.findings)).not.toContain("fees-above-advertised");
+    expect(kinds(r.findings)).not.toContain("transaction-fees-off-schedule");
+    expect(r.feeComparison.transaction).toEqual({
+      chargedCents: 200,
+      advertisedCents: 100,
+      accepted: { since: "2026-10-01T12:00:01.000Z", chargedCents: 200, expectedCents: 200 },
+    });
+  });
+
+  test("a month off the schedule is a finding of its own, in either direction", () => {
+    // October: postings stop being charged (the fee goes for 3 of 6 events); November: a fee too many, and odd.
+    const october = ["2026-10-01", "2026-10-05", "2026-10-09"].flatMap((d) => purchase(d).slice(0, 3));
+    const november = [
+      ...purchase("2026-11-03"),
+      { ...fee({ at: "2026-11-03T14:00:01.000Z" }), amount: "-0.75" },
+    ];
+    const r = reconcileWith([...october, ...november], [issue], {
+      [card0]: { transaction: [{ from: "2026-10-01T00:00:00.000Z", ...both }] },
+    });
+    const off = r.findings.filter((f) => f.kind === "transaction-fees-off-schedule");
+    expect(off.map((f) => [f.scope, f.cents])).toEqual([
+      ["2026-10", 150],
+      ["2026-11", -75],
+    ]);
+    expect(off[1]?.message).toMatch(/^In November 2026, /);
+    expect(off[1]?.message).toContain("1 fee wasn't one of the schedule's amounts");
+  });
+
+  test("small differences, like a batch in flight, are allowed", () => {
+    const rows = [
+      ...purchase("2026-10-01"),
+      ...purchase("2026-10-02"),
+      fee({ at: "2026-10-03T00:00:01.000Z" }),
+    ];
+    const r = reconcileWith(rows, [issue], {
+      [card0]: { transaction: [{ from: "2026-10-01T00:00:00.000Z", ...both }] },
+    });
+    expect(kinds(r.findings)).not.toContain("transaction-fees-off-schedule");
+  });
+
+  test("a schedule from later leaves the advertised check on the time before it", () => {
+    const rows = [...purchase("2026-10-01"), ...purchase("2026-11-03")];
+    const r = reconcileWith(rows, [issue], {
+      [card0]: { transaction: [{ from: "2026-11-01T00:00:00.000Z", ...both }] },
+    });
+    const advertised = r.findings.find((f) => f.kind === "fees-above-advertised");
+    expect(advertised?.cents).toBe(-50);
+    expect(r.feeComparison.transaction.accepted?.since).toBe("2026-11-01T00:00:00.000Z");
+  });
+
+  test("each top-up is checked against the accepted rate, and the advertised check stops", () => {
+    const topups = [
+      order({ at: "2026-10-01T10:00:00.000Z", amount: 250, invoiceAmount: "266.25" }),
+      // 2fiat drops its fee to the advertised 6% for this one.
+      order({ at: "2026-10-10T10:00:00.000Z", amount: 250, invoiceAmount: "265.00" }),
+    ];
+    const r = reconcileWith([], [issue, ...topups], {
+      [card0]: { topup: [{ from: "2026-08-19T00:00:00.000Z", rateBps: 650 }] },
+    });
+    expect(kinds(r.findings)).not.toContain("topup-fee-above-advertised");
+    const off = r.findings.filter((f) => f.kind === "topup-fee-off-schedule");
+    expect(off.map((f) => f.cents)).toEqual([125]);
+    expect(off[0]?.message).toContain("$1.25 less");
+    expect(r.feeComparison.topup).toEqual({
+      chargedCents: 3125,
+      advertisedCents: 3000,
+      accepted: { since: "2026-08-19T00:00:00.000Z", chargedCents: 3125, expectedCents: 3250 },
+    });
+  });
+});

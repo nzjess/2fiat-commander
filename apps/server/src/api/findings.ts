@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { Db } from "../db/db.ts";
 import { cards, findings } from "../db/schema.ts";
+import { SCOPED_KINDS } from "../findings.ts";
 import { type AccountEnv, type AppDeps, idParam, invalid, notFound } from "./common.ts";
 
 const asOf = (evaluationId: Column) =>
@@ -16,6 +17,10 @@ function selectFindings(db: Db) {
       id: findings.id,
       cardId: findings.cardId,
       kind: findings.kind,
+      /** What a scoped finding is about, e.g. the month "2026-10"; null for other kinds. */
+      scope: sql<
+        string | null
+      >`CASE WHEN ${inArray(findings.kind, [...SCOPED_KINDS])} THEN substr(${findings.fingerprint}, length(${findings.kind}) + 2) END`,
       cents: findings.cents,
       message: findings.message,
       activityIds: findings.activityIds,

@@ -6,10 +6,14 @@ export {
   type CardCosts,
   type CardReconciliation,
   type FeeAudit,
+  type FeeComparison,
+  type FeeSchedules,
   type Finding,
   type FindingKind,
   type ReconcileInput,
   reconcile,
+  type TopupFeeSchedule,
+  type TransactionFeeSchedule,
 } from "./normalize/reconcile.ts";
 export { type ProductTerms, productTerms } from "./normalize/terms.ts";
 export { descriptionSimilarity } from "./normalize/text.ts";

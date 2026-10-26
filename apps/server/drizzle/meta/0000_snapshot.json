@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "82e78cce-29c2-4e5a-80c0-933dc166f94d",
+  "id": "60b2f1ef-7d10-4275-8080-a246da4edcaf",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "accounts": {
@@ -1049,6 +1049,114 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
+    },
+    "fee_schedules": {
+      "name": "fee_schedules",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "product": {
+          "name": "product",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "effective_from": {
+          "name": "effective_from",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "rate_bps": {
+          "name": "rate_bps",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "authorization_fee_cents": {
+          "name": "authorization_fee_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "posting_fee_cents": {
+          "name": "posting_fee_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "fee_schedules_start": {
+          "name": "fee_schedules_start",
+          "columns": ["account_id", "product", "kind", "effective_from"],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "fee_schedules_account_id_accounts_id_fk": {
+          "name": "fee_schedules_account_id_accounts_id_fk",
+          "tableFrom": "fee_schedules",
+          "tableTo": "accounts",
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "fee_schedules_values": {
+          "name": "fee_schedules_values",
+          "value": "(\"fee_schedules\".\"kind\" = 'topup' AND \"fee_schedules\".\"rate_bps\" IS NOT NULL AND \"fee_schedules\".\"authorization_fee_cents\" IS NULL AND \"fee_schedules\".\"posting_fee_cents\" IS NULL) OR (\"fee_schedules\".\"kind\" = 'transaction' AND \"fee_schedules\".\"rate_bps\" IS NULL AND \"fee_schedules\".\"authorization_fee_cents\" IS NOT NULL AND \"fee_schedules\".\"posting_fee_cents\" IS NOT NULL)"
+        }
+      }
     },
     "findings": {
       "name": "findings",

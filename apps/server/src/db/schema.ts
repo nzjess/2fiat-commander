@@ -254,6 +254,43 @@ export const adjustments = sqliteTable(
 );
 
 /**
+ * Fees the user accepted as 2fiat's practice, for a card product in an account: a top-up rate, or a fee per
+ * authorisation and per posting. From `effective_from` on, fees are checked against the schedule in force rather than
+ * the advert, so the known difference stops being a finding but a change in 2fiat's charges still shows up. A new
+ * row starts a new schedule; the old ones stay as history.
+ */
+export const feeSchedules = sqliteTable(
+  "fee_schedules",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    accountId: integer("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    /** As in `cards.product`. */
+    product: text().notNull(),
+    kind: text().$type<"topup" | "transaction">().notNull(),
+    effectiveFrom: text("effective_from").notNull(),
+    /** Top-ups: basis points, so 650 is 6.5%. */
+    rateBps: integer("rate_bps"),
+    /** Transaction fees, per authorisation attempt and per posting. */
+    authorizationFeeCents: integer("authorization_fee_cents"),
+    postingFeeCents: integer("posting_fee_cents"),
+    note: text().notNull(),
+    createdAt: createdAt(),
+    updatedAt: text("updated_at")
+      .notNull()
+      .$defaultFn(() => now()),
+  },
+  (t) => [
+    unique("fee_schedules_start").on(t.accountId, t.product, t.kind, t.effectiveFrom),
+    check(
+      "fee_schedules_values",
+      sql`(${t.kind} = 'topup' AND ${t.rateBps} IS NOT NULL AND ${t.authorizationFeeCents} IS NULL AND ${t.postingFeeCents} IS NULL) OR (${t.kind} = 'transaction' AND ${t.rateBps} IS NULL AND ${t.authorizationFeeCents} IS NOT NULL AND ${t.postingFeeCents} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/**
  * What makes up each activity: raw rows, or the user's adjustment. Every raw row belongs to exactly one activity.
  */
 export const activitySources = sqliteTable(

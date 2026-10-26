@@ -73,6 +73,23 @@ export const spendingQuery = (accountId: string, logicalCardId: number) =>
       ),
   });
 
+export const feeSchedulesQuery = (accountId: string) =>
+  queryOptions({
+    queryKey: ["accounts", accountId, "fee-schedules"],
+    queryFn: () => ok(account["fee-schedules"].$get({ param: { accountId }, query: {} })),
+  });
+
+export const feesQuery = (accountId: string, logicalCardId: number) =>
+  queryOptions({
+    queryKey: ["accounts", accountId, "fees", logicalCardId],
+    queryFn: () =>
+      ok(
+        account["logical-cards"][":logicalCardId"].fees.$get({
+          param: { accountId, logicalCardId: String(logicalCardId) },
+        }),
+      ),
+  });
+
 export const adjustmentsQuery = (accountId: string, logicalCardId: number) =>
   queryOptions({
     queryKey: ["accounts", accountId, "adjustments", logicalCardId],

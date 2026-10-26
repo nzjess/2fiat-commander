@@ -6,6 +6,7 @@ import { adjustmentRoutes } from "./api/adjustments.ts";
 import { authRoutes } from "./api/auth.ts";
 import { cardRoutes } from "./api/cards.ts";
 import { type AppDeps, handleError, loadAccount, requireUser } from "./api/common.ts";
+import { feeScheduleRoutes } from "./api/feeSchedules.ts";
 import { findingRoutes } from "./api/findings.ts";
 
 export type { AppDeps } from "./api/common.ts";
@@ -31,6 +32,7 @@ export function createApp(deps: AppDeps) {
       .route("/accounts/:accountId", activityRoutes(deps))
       .route("/accounts/:accountId", findingRoutes(deps))
       .route("/accounts/:accountId", adjustmentRoutes(deps))
+      .route("/accounts/:accountId", feeScheduleRoutes(deps))
   );
 }
 

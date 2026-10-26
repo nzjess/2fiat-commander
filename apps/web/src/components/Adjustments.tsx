@@ -290,7 +290,7 @@ export function AdjustmentList({
       )}
       {!readOnly && (
         <Group>
-          <Button size="xs" variant="light" onClick={() => setDraft({})}>
+          <Button size="compact-xs" variant="light" onClick={() => setDraft({})}>
             Record an adjustment
           </Button>
         </Group>

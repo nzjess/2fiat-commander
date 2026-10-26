@@ -31,6 +31,8 @@ export const FINDING_KIND_LABELS: Record<FindingKind, string> = {
   "unmatched-transfer": "Unmatched transfer",
   "fees-above-advertised": "Fees above advertised",
   "topup-fee-above-advertised": "Top-up fee above advertised",
+  "topup-fee-off-schedule": "Top-up fee off schedule",
+  "transaction-fees-off-schedule": "Fees off schedule",
 };
 
 export const ACTIVITY_KIND_LABELS: Record<ActivityKind, string> = {
@@ -88,6 +90,19 @@ export const ACTIVITY_FLAG_LABELS: Record<ActivityFlag, { label: string; descrip
   },
   "unknown-row": { label: "Unknown row", description: "A kind of 2fiat row we don't know" },
 };
+
+/** A rate in basis points as a percentage, e.g. 650 → "6.5%". */
+export function formatRate(bps: number): string {
+  return `${Number((bps / 100).toFixed(2))}%`;
+}
+
+/** A percentage as typed ("6.5" or "6.5%") as basis points; undefined unless 0–100 with at most two decimals. */
+export function toBps(value: string): number | undefined {
+  const text = value.trim().replace(/%$/, "").trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(text)) return undefined;
+  const bps = Math.round(Number(text) * 100);
+  return bps <= 10_000 ? bps : undefined;
+}
 
 /** The last four digits of a masked card number like "5257 **** **** 0000". */
 export function lastFour(maskedNumber: string): string {

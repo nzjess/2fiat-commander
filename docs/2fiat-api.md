@@ -105,8 +105,9 @@ The Regular product's description advertises: card $50 including a $20 starting 
 balance. Observed in a real capture:
 
 - **Fee rows start in mid-September 2026.** There are none before, on any card.
-- **Postings are charged too.** Since then, fee rows ≈ authorisations + postings + declines (exactly on some cards, a few short on others). So a purchase costs
-  $1.00 in fees, not the advertised $0.50.
+- **Postings are charged too.** Since then, fee rows ≈ authorisations + postings + declines (exactly on some cards, a few short on others). So a purchase costs $1.00 in fees, not the advertised $0.50.
+- **Some fees are simply never charged.** The small shortfalls above aren't batches still to post: they were still missing weeks later. So fee rows can fall a few short of
+  the events, in the card holder's favour. Fees post in batches on even hours, a median of ~1.3 h after the event.
 - **Top-ups are charged 6.5%** (`invoice.amount = 1.065 × amount` on every order), against the 6% in the description.
   The site's product tiles say 6.5% for other products.
 - **Balances don't reconcile exactly** from the card's issue onwards: most are a few dollars out, and one was out by nearly a whole order, next to an order credited only $0.01. `reconcile()` surfaces these as findings rather than explaining them away.

@@ -4,10 +4,12 @@ import { cardNetwork, expiryLabel } from "../src/components/CardFace.tsx";
 import {
   cardLabel,
   formatMoney,
+  formatRate,
   isoToLocalDate,
   localDateToIso,
   localDayStart,
   timeAgo,
+  toBps,
   toCents,
 } from "../src/lib/format.ts";
 import {
@@ -40,6 +42,25 @@ describe("money", () => {
     expect(toCents("1.005")).toBeUndefined();
     expect(toCents("12,50")).toBeUndefined();
     expect(toCents("")).toBeUndefined();
+  });
+});
+
+describe("rates", () => {
+  test("show basis points as a percentage", () => {
+    expect(formatRate(650)).toBe("6.5%");
+    expect(formatRate(600)).toBe("6%");
+    expect(formatRate(1)).toBe("0.01%");
+  });
+
+  test("read a typed percentage as basis points, exactly", () => {
+    expect(toBps("6.5")).toBe(650);
+    expect(toBps(" 6.5% ")).toBe(650);
+    expect(toBps("0.07")).toBe(7);
+    expect(toBps("100")).toBe(10_000);
+    expect(toBps("100.01")).toBeUndefined();
+    expect(toBps("6.555")).toBeUndefined();
+    expect(toBps("-1")).toBeUndefined();
+    expect(toBps("")).toBeUndefined();
   });
 });
 

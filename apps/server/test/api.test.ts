@@ -1,4 +1,13 @@
-import { authorization, CARD_A, CARD_B, card, order, topupRow, withdraw } from "@twofiat/client/fixtures";
+import {
+  authorization,
+  CARD_A,
+  CARD_B,
+  card,
+  fee,
+  order,
+  topupRow,
+  withdraw,
+} from "@twofiat/client/fixtures";
 import { eq } from "drizzle-orm";
 import { type ClientResponse, hc } from "hono/client";
 import type { SuccessStatusCode } from "hono/utils/http-status";
@@ -757,5 +766,95 @@ describe("findings", () => {
     expect(resolved).toMatchObject([{ id: gap?.id, resolvedAt: "2026-10-22T12:00:00.000Z" }]);
     const all = await ok(findings.$get({ param: s.param, query: { status: "all" } }));
     expect(all).toHaveLength(open.length + 1);
+  });
+});
+
+describe("fee schedules", () => {
+  test("accepting 2fiat's fees stops the advertised finding, and a month off the schedule is found", async () => {
+    const s = await synced();
+    // Four fees too many on card A: $2.50 charged for an authorisation and a posting.
+    for (const at of ["10:00", "12:00", "14:00", "16:00"]) {
+      s.twofiat.state.transactions.push(fee({ card: CARD_A, at: `2026-10-14T${at}:01.000Z` }));
+    }
+    await s.runner.sync(s.accountId, "manual");
+    const openKinds = async () =>
+      (await ok(s.account.findings.$get({ param: s.param, query: {} }))).map((f) => [f.kind, f.cents]);
+    expect(await openKinds()).toContainEqual(["fees-above-advertised", -200]);
+
+    const a = (await s.cardsByTwofiatId()).get(CARD_A);
+    const schedules = s.account["fee-schedules"];
+    const suggestion = await ok(
+      schedules.suggestion.$get({ param: s.param, query: { cardId: String(a?.id), kind: "transaction" } }),
+    );
+    if (suggestion.kind !== "transaction") throw new Error("not a transaction suggestion");
+    expect(suggestion).toEqual({
+      product: a?.product,
+      kind: "transaction",
+      effectiveFrom: s.rows.feeA.createdAt,
+      authorizationFeeCents: 50,
+      postingFeeCents: 50,
+    });
+
+    const created = await schedules.$post({
+      param: s.param,
+      json: { ...suggestion, note: "2fiat charges postings too" },
+    });
+    expect(created.status).toBe(201);
+    const schedule = (await created.json()) as { id: number };
+    // The advert no longer applies; October is off the accepted schedule by the four extra fees, less one allowed.
+    expect(await openKinds()).not.toContainEqual(expect.arrayContaining(["fees-above-advertised"]));
+    expect(await openKinds()).toContainEqual(["transaction-fees-off-schedule", -150]);
+    const month = (
+      await ok(s.account.findings.$get({ param: s.param, query: { kind: "transaction-fees-off-schedule" } }))
+    )[0];
+    expect(month).toMatchObject({ scope: "2026-10", message: expect.stringMatching(/^In October 2026, /) });
+    expect(
+      (await ok(s.account.findings.$get({ param: s.param, query: {} }))).find(
+        (f) => f.kind === "stale-authorization",
+      )?.scope,
+    ).toBeNull();
+    expect((await schedules.$post({ param: s.param, json: { ...suggestion, note: "again" } })).status).toBe(
+      409,
+    );
+
+    // $2.00 an authorisation matches what was charged.
+    const param = { ...s.param, scheduleId: String(schedule.id) };
+    expect((await schedules[":scheduleId"].$patch({ param, json: { rateBps: 600 } })).status).toBe(400);
+    await ok(schedules[":scheduleId"].$patch({ param, json: { authorizationFeeCents: 200 } }));
+    expect(await openKinds()).not.toContainEqual(expect.arrayContaining(["transaction-fees-off-schedule"]));
+    const fees = await ok(
+      s.account["logical-cards"][":logicalCardId"].fees.$get({
+        param: { ...s.param, logicalCardId: String(a?.logicalCardId) },
+      }),
+    );
+    expect(fees.cards.map((c) => c.transaction)).toEqual([
+      {
+        chargedCents: 250,
+        advertisedCents: 50,
+        accepted: { since: s.rows.feeA.createdAt, chargedCents: 250, expectedCents: 250 },
+      },
+    ]);
+    expect(
+      (await ok(schedules.$get({ param: s.param, query: {} }))).map((x) => x.authorizationFeeCents),
+    ).toEqual([200]);
+
+    // Without it, the advert applies again.
+    expect((await schedules[":scheduleId"].$delete({ param })).status).toBe(204);
+    expect(await openKinds()).toContainEqual(["fees-above-advertised", -200]);
+  });
+
+  test("rejects a schedule for a product the account has no card of", async () => {
+    const s = await synced();
+    const res = await s.account["fee-schedules"].$post({
+      param: s.param,
+      json: {
+        kind: "topup",
+        product: "Nope",
+        effectiveFrom: "2026-10-01T00:00:00.000Z",
+        note: "x",
+        rateBps: 650,
+      },
+    });
+    expect(res.status).toBe(400);
   });
 });
