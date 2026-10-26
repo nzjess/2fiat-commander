@@ -1,6 +1,7 @@
 import { Box, Group, Stack, Text } from "@mantine/core";
 import type { Card } from "../api.ts";
 import { formatMoney, isActive } from "../lib/format.ts";
+import { CardChip } from "./CardChip.tsx";
 
 /** The network from a card number's first digit: 4 is Visa, 2 and 5 are Mastercard. */
 export function cardNetwork(maskedNumber: string): "visa" | "mastercard" | undefined {
@@ -91,12 +92,7 @@ export function CardFace({
           </Text>
         )}
       </Group>
-      <Box
-        aria-hidden
-        w={width * 0.13}
-        h={width * 0.1}
-        style={{ borderRadius: 6, background: "linear-gradient(135deg, #e9d8a6, #b8a26a)" }}
-      />
+      <CardChip width={width * 0.14} />
       <Stack gap={4}>
         <Text ff="monospace" fz={width * 0.058} lts={1.5} lh={1} style={{ whiteSpace: "nowrap" }}>
           {card.maskedNumber}
