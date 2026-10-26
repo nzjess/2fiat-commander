@@ -2,12 +2,36 @@ import { zValidator } from "@hono/zod-validator";
 import { and, asc, eq, gte, inArray, notExists, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
-import type { Db } from "../db/db.ts";
+import type { Db, Executor } from "../db/db.ts";
 import { balanceSnapshots, cards, evaluations, logicalCards, openingBalances } from "../db/schema.ts";
 import { reevaluate } from "../reevaluate.ts";
-import { type AccountEnv, type AppDeps, idParam, invalid, notFound } from "./common.ts";
+import { type AccountEnv, ApiError, type AppDeps, idParam, invalid, notFound } from "./common.ts";
 
 type CardRow = typeof cards.$inferSelect;
+
+/** Whether `a` was issued after `b`. A card with no issue date counts as the oldest. */
+const issuedAfter = (a: CardRow, b: CardRow) => (a.issuedAt ?? "") > (b.issuedAt ?? "");
+
+/** Gives a logical card without a current card its latest-issued card (on a tie, the newest row) as current. */
+function electCurrent(q: Executor, logicalCardId: number) {
+  const members = q
+    .select()
+    .from(cards)
+    .where(eq(cards.logicalCardId, logicalCardId))
+    .orderBy(asc(cards.id))
+    .all();
+  if (members.length === 0 || members.some((c) => c.isCurrent)) return;
+  const latest = members.reduce((best, c) => (issuedAfter(best, c) ? best : c));
+  q.update(cards).set({ isCurrent: true }).where(eq(cards.id, latest.id)).run();
+}
+
+function makeCurrent(q: Executor, card: CardRow) {
+  q.update(cards)
+    .set({ isCurrent: false })
+    .where(and(eq(cards.logicalCardId, card.logicalCardId), eq(cards.isCurrent, true)))
+    .run();
+  q.update(cards).set({ isCurrent: true }).where(eq(cards.id, card.id)).run();
+}
 
 /** Each card's latest balance snapshot, with when it was evaluated. */
 function latestSnapshots(db: Db, cardIds: number[]) {
@@ -58,6 +82,7 @@ function cardDtos(db: Db, rows: CardRow[]) {
   return rows.map((c) => ({
     id: c.id,
     logicalCardId: c.logicalCardId,
+    isCurrent: c.isCurrent,
     twofiatId: c.twofiatId,
     alias: c.alias,
     maskedNumber: c.maskedNumber,
@@ -107,6 +132,7 @@ function logicalCardDtos(db: Db, accountId: number) {
         name: l.name,
         createdAt: l.createdAt,
         cardIds: own.map((c) => c.id),
+        currentCardId: own.find((c) => c.isCurrent)?.id ?? null,
         /** The sum over its physical cards' latest balances; null while none has one. */
         balance:
           known.length === 0
@@ -134,7 +160,9 @@ export function cardRoutes(deps: AppDeps) {
         c.json(cardDto(db, cardOf(db, c.var.account.id, idParam(c, "cardId", "card")))),
       )
       // Moves a physical card into another logical card (e.g. a replacement into its predecessor's), or with
-      // null into a logical card of its own. A logical card left empty is deleted.
+      // null into a logical card of its own. The moved card becomes current if it was issued after the target's
+      // current card. A logical card that loses its current card gets its latest-issued one as current, and one
+      // left empty is deleted.
       .patch(
         "/cards/:cardId",
         zValidator("json", z.object({ logicalCardId: z.number().int().positive().nullable() }), invalid),
@@ -142,6 +170,7 @@ export function cardRoutes(deps: AppDeps) {
           const accountId = c.var.account.id;
           const card = cardOf(db, accountId, idParam(c, "cardId", "card"));
           const { logicalCardId } = c.req.valid("json");
+          if (logicalCardId === card.logicalCardId) return c.json(cardDto(db, card));
           db.transaction((q) => {
             let target = logicalCardId;
             if (target === null) {
@@ -158,7 +187,18 @@ export function cardRoutes(deps: AppDeps) {
                 .get();
               if (!exists) throw notFound("logical card");
             }
-            q.update(cards).set({ logicalCardId: target }).where(eq(cards.id, card.id)).run();
+            q.update(cards)
+              .set({ logicalCardId: target, isCurrent: false })
+              .where(eq(cards.id, card.id))
+              .run();
+            const current = q
+              .select()
+              .from(cards)
+              .where(and(eq(cards.logicalCardId, target), eq(cards.isCurrent, true)))
+              .get();
+            if (current && issuedAfter(card, current)) makeCurrent(q, { ...card, logicalCardId: target });
+            electCurrent(q, target);
+            electCurrent(q, card.logicalCardId);
             q.delete(logicalCards)
               .where(
                 and(
@@ -201,18 +241,43 @@ export function cardRoutes(deps: AppDeps) {
         return c.json(cardDto(db, card));
       })
       .get("/logical-cards", (c) => c.json(logicalCardDtos(db, c.var.account.id)))
+      // Renames a logical card, or picks which of its physical cards is current.
       .patch(
         "/logical-cards/:logicalCardId",
-        zValidator("json", z.object({ name: z.string().trim().min(1).max(100) }), invalid),
+        zValidator(
+          "json",
+          z
+            .object({ name: z.string().trim().min(1).max(100), currentCardId: z.number().int().positive() })
+            .partial()
+            .refine(
+              (v) => v.name !== undefined || v.currentCardId !== undefined,
+              "name or currentCardId is required",
+            ),
+          invalid,
+        ),
         (c) => {
           const accountId = c.var.account.id;
           const id = idParam(c, "logicalCardId", "logical card");
-          const changed = db
-            .update(logicalCards)
-            .set({ name: c.req.valid("json").name })
-            .where(and(eq(logicalCards.id, id), eq(logicalCards.accountId, accountId)))
-            .run().changes;
-          if (changed === 0) throw notFound("logical card");
+          const { name, currentCardId } = c.req.valid("json");
+          db.transaction((q) => {
+            const exists = q
+              .select({ id: logicalCards.id })
+              .from(logicalCards)
+              .where(and(eq(logicalCards.id, id), eq(logicalCards.accountId, accountId)))
+              .get();
+            if (!exists) throw notFound("logical card");
+            if (name !== undefined) q.update(logicalCards).set({ name }).where(eq(logicalCards.id, id)).run();
+            if (currentCardId !== undefined) {
+              const card = q
+                .select()
+                .from(cards)
+                .where(and(eq(cards.id, currentCardId), eq(cards.logicalCardId, id)))
+                .get();
+              if (!card)
+                throw new ApiError(400, "invalid_request", "currentCardId: not a card of this logical card");
+              makeCurrent(q, card);
+            }
+          });
           return c.json(logicalCardDtos(db, accountId).find((l) => l.id === id));
         },
       )

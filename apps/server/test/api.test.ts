@@ -6,7 +6,7 @@ import { describe, expect, test } from "vitest";
 import { type App, createApp } from "../src/app.ts";
 import { createUser, hashPassword } from "../src/auth.ts";
 import { openDb } from "../src/db/db.ts";
-import { accounts, sessions, syncs } from "../src/db/schema.ts";
+import { accounts, cards as cardsTable, sessions, syncs } from "../src/db/schema.ts";
 import { Secrets } from "../src/secrets.ts";
 import { SyncRunner } from "../src/sync.ts";
 import { fake2fiat } from "./fake-2fiat.ts";
@@ -336,6 +336,55 @@ describe("cards and balances", () => {
     });
     expect(await renamed.json()).toMatchObject({ name: "Everyday", cardIds: [b?.id] });
     expect((await move(999)).status).toBe(404);
+  });
+
+  test("keeps exactly one current card per logical card", async () => {
+    const s = await synced();
+    // B replaces A: issued later.
+    s.db
+      .update(cardsTable)
+      .set({ issuedAt: "2026-09-01T00:00:00.000Z" })
+      .where(eq(cardsTable.twofiatId, CARD_B))
+      .run();
+    const cards = await s.cardsByTwofiatId();
+    const [a, b] = [cards.get(CARD_A), cards.get(CARD_B)];
+    expect([a?.isCurrent, b?.isCurrent]).toEqual([true, true]);
+    const move = (id: number | undefined, logicalCardId: number | null) =>
+      ok(
+        s.account.cards[":cardId"].$patch({
+          param: { ...s.param, cardId: String(id) },
+          json: { logicalCardId },
+        }),
+      );
+    const logical = async () => {
+      const all = await ok(s.account["logical-cards"].$get({ param: s.param }));
+      return all.map((l) => ({ cardIds: l.cardIds, currentCardId: l.currentCardId }));
+    };
+    const setCurrent = (logicalCardId: number | undefined, currentCardId: number | undefined) =>
+      s.account["logical-cards"][":logicalCardId"].$patch({
+        param: { ...s.param, logicalCardId: String(logicalCardId) },
+        json: { currentCardId },
+      });
+
+    // The later-issued card moving in becomes current.
+    await move(b?.id, a?.logicalCardId ?? 0);
+    expect(await logical()).toEqual([{ cardIds: [a?.id, b?.id], currentCardId: b?.id }]);
+
+    // The user can override it, but only with a member.
+    expect((await setCurrent(a?.logicalCardId, a?.id)).status).toBe(200);
+    expect(await logical()).toEqual([{ cardIds: [a?.id, b?.id], currentCardId: a?.id }]);
+
+    // Moving the current card out leaves the other one current; it's current in its own logical card.
+    const split = await move(a?.id, null);
+    expect(await logical()).toEqual([
+      { cardIds: [b?.id], currentCardId: b?.id },
+      { cardIds: [a?.id], currentCardId: a?.id },
+    ]);
+    expect((await setCurrent(split.logicalCardId, b?.id)).status).toBe(400);
+
+    // An earlier-issued card moving in doesn't take over.
+    await move(a?.id, a?.logicalCardId ?? 0);
+    expect(await logical()).toEqual([{ cardIds: [a?.id, b?.id], currentCardId: b?.id }]);
   });
 });
 

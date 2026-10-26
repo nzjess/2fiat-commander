@@ -98,7 +98,10 @@ export const logicalCards = sqliteTable(
   (t) => [unique("logical_cards_id_account").on(t.id, t.accountId)],
 );
 
-/** A physical card: one 2fiat card. Balances, rows and reconciliation all live at this level. */
+/**
+ * A physical card: one 2fiat card. Balances, rows and reconciliation all live at this level. Exactly one card of
+ * each logical card is its current card (the index allows at most one; the API keeps one).
+ */
 export const cards = sqliteTable(
   "cards",
   {
@@ -107,6 +110,7 @@ export const cards = sqliteTable(
       .notNull()
       .references(() => accounts.id, { onDelete: "cascade" }),
     logicalCardId: integer("logical_card_id").notNull(),
+    isCurrent: integer("is_current", { mode: "boolean" }).notNull(),
     twofiatId: text("twofiat_id").notNull(),
     alias: text().notNull(),
     maskedNumber: text("masked_number").notNull(),
@@ -131,6 +135,7 @@ export const cards = sqliteTable(
       foreignColumns: [logicalCards.id, logicalCards.accountId],
     }),
     index("cards_logical_card").on(t.logicalCardId),
+    uniqueIndex("cards_one_current").on(t.logicalCardId).where(sql`is_current = 1`),
   ],
 );
 

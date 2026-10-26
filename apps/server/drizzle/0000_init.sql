@@ -100,6 +100,7 @@ CREATE TABLE `cards` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`account_id` integer NOT NULL,
 	`logical_card_id` integer NOT NULL,
+	`is_current` integer NOT NULL,
 	`twofiat_id` text NOT NULL,
 	`alias` text NOT NULL,
 	`masked_number` text NOT NULL,
@@ -116,6 +117,7 @@ CREATE TABLE `cards` (
 );
 --> statement-breakpoint
 CREATE INDEX `cards_logical_card` ON `cards` (`logical_card_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `cards_one_current` ON `cards` (`logical_card_id`) WHERE is_current = 1;--> statement-breakpoint
 CREATE UNIQUE INDEX `cards_account_twofiat` ON `cards` (`account_id`,`twofiat_id`);--> statement-breakpoint
 CREATE TABLE `categories` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "587b57d8-b5ee-46b3-ba88-9a2ced010424",
+  "id": "cd0f7604-576c-4a7b-876a-ca2b6b5c02d1",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "accounts": {
@@ -664,6 +664,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "is_current": {
+          "name": "is_current",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "twofiat_id": {
           "name": "twofiat_id",
           "type": "text",
@@ -747,6 +754,12 @@
           "name": "cards_logical_card",
           "columns": ["logical_card_id"],
           "isUnique": false
+        },
+        "cards_one_current": {
+          "name": "cards_one_current",
+          "columns": ["logical_card_id"],
+          "isUnique": true,
+          "where": "is_current = 1"
         },
         "cards_account_twofiat": {
           "name": "cards_account_twofiat",

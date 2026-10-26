@@ -218,7 +218,7 @@ function upsertCards(q: Executor, accountId: number, details: RawCardDetails[], 
       .returning({ id: logicalCards.id })
       .get().id;
     q.insert(cards)
-      .values({ ...values, accountId, logicalCardId, twofiatId: raw.id, firstSeenAt: now })
+      .values({ ...values, accountId, logicalCardId, isCurrent: true, twofiatId: raw.id, firstSeenAt: now })
       .run();
     created++;
   }

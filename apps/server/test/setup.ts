@@ -33,6 +33,7 @@ export function setup() {
       .values({
         accountId: account,
         logicalCardId,
+        isCurrent: true,
         twofiatId: raw.id,
         alias: raw.alias,
         maskedNumber: raw.cardNumber,
