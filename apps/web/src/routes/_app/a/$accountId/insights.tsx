@@ -8,6 +8,7 @@ import { CashFlowChart } from "../../../../components/CashFlowChart.tsx";
 import { FeesPanel } from "../../../../components/FeeSchedules.tsx";
 import { SpendingChart } from "../../../../components/SpendingChart.tsx";
 import { parseInsightsSearch } from "../../../../lib/search.ts";
+import { defaultCard } from "../../../../lib/storage.ts";
 import {
   accountQuery,
   balanceHistoryQuery,
@@ -24,7 +25,7 @@ export const Route = createFileRoute("/_app/a/$accountId/insights")({
   loaderDeps: ({ search }) => search,
   loader: async ({ context: { queryClient }, params: { accountId }, deps }) => {
     const logicalCards = await queryClient.ensureQueryData(logicalCardsQuery(accountId));
-    const id = deps.card ?? logicalCards[0]?.id;
+    const id = deps.card ?? defaultCard(accountId, logicalCards);
     if (id === undefined || !logicalCards.some((l) => l.id === id)) return;
     await Promise.all([
       queryClient.ensureQueryData(cashFlowQuery(accountId, id)),
@@ -43,7 +44,7 @@ function Insights() {
   const navigate = Route.useNavigate();
   const { data: account } = useSuspenseQuery(accountQuery(accountId));
   const { data: logicalCards } = useSuspenseQuery(logicalCardsQuery(accountId));
-  const logical = logicalCards.find((l) => l.id === (search.card ?? logicalCards[0]?.id));
+  const logical = logicalCards.find((l) => l.id === (search.card ?? defaultCard(accountId, logicalCards)));
 
   return (
     <Stack gap="lg">

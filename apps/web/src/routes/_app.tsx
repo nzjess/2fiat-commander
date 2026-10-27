@@ -10,10 +10,10 @@ import {
   useParams,
 } from "@tanstack/react-router";
 import { api, isUnauthenticated, send } from "../api.ts";
-import { NavItem } from "../components/links.tsx";
+import { NavItem, useUrlCard } from "../components/links.tsx";
 import { SyncButton } from "../components/SyncButton.tsx";
-import { getLastAccount } from "../lib/storage.ts";
-import { accountsQuery, fxQuery, meQuery } from "../queries.ts";
+import { getLastAccount, getLastCard } from "../lib/storage.ts";
+import { accountsQuery, fxQuery, logicalCardsQuery, meQuery } from "../queries.ts";
 
 /** Everything behind the login: the shell with the account switcher, sync and navigation. */
 export const Route = createFileRoute("/_app")({
@@ -74,6 +74,12 @@ function Layout() {
 
 function Nav({ accountId, onNavigate }: { accountId: string | undefined; onNavigate: () => void }) {
   const matchRoute = useMatchRoute();
+  // The card in view, else the last one chosen in this account: the per-card pages stay on it.
+  const { data: logicalCards } = useQuery({ ...logicalCardsQuery(accountId ?? ""), enabled: !!accountId });
+  const urlCard = useUrlCard();
+  const remembered = accountId === undefined ? undefined : getLastCard(accountId);
+  const card = [urlCard, remembered].find((id) => logicalCards?.some((l) => l.id === id));
+  const search = card === undefined ? {} : { card };
   return (
     <>
       {accountId && (
@@ -93,6 +99,7 @@ function Nav({ accountId, onNavigate }: { accountId: string | undefined; onNavig
           <NavItem
             to="/a/$accountId/activity"
             params={{ accountId }}
+            search={search}
             label="Activity"
             active={!!matchRoute({ to: "/a/$accountId/activity", params: { accountId } })}
             onClick={onNavigate}
@@ -100,6 +107,7 @@ function Nav({ accountId, onNavigate }: { accountId: string | undefined; onNavig
           <NavItem
             to="/a/$accountId/insights"
             params={{ accountId }}
+            search={search}
             label="Insights"
             active={!!matchRoute({ to: "/a/$accountId/insights", params: { accountId } })}
             onClick={onNavigate}
@@ -107,6 +115,7 @@ function Nav({ accountId, onNavigate }: { accountId: string | undefined; onNavig
           <NavItem
             to="/a/$accountId/findings"
             params={{ accountId }}
+            search={search}
             label="Findings"
             active={!!matchRoute({ to: "/a/$accountId/findings", params: { accountId } })}
             onClick={onNavigate}

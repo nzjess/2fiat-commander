@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { ApiError, apiError, isUnauthenticated } from "../src/api.ts";
 import { cardNetwork, expiryLabel } from "../src/components/CardFace.tsx";
 import {
@@ -22,6 +22,7 @@ import {
   positiveInt,
   safeRedirect,
 } from "../src/lib/search.ts";
+import { defaultCard, getLastCard, setLastCard } from "../src/lib/storage.ts";
 
 describe("money", () => {
   test("formats cents as US dollars, in any locale", () => {
@@ -269,5 +270,29 @@ describe("API errors", () => {
     expect(isUnauthenticated(apiError(401, { error: "unauthenticated", message: "log in" }))).toBe(true);
     expect(isUnauthenticated(apiError(401, { error: "invalid_credentials", message: "wrong" }))).toBe(false);
     expect(isUnauthenticated(new Error("x"))).toBe(false);
+  });
+});
+
+describe("the remembered card", () => {
+  test("is the default while it exists, else the first card; without storage, the first", () => {
+    const cards = [{ id: 4 }, { id: 7 }];
+    expect(defaultCard("1", cards)).toBe(4);
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => store.set(k, v),
+    });
+    try {
+      setLastCard("1", 7);
+      expect(getLastCard("1")).toBe(7);
+      expect(defaultCard("1", cards)).toBe(7);
+      // Per account.
+      expect(defaultCard("2", cards)).toBe(4);
+      // A card that's gone (e.g. linked into another).
+      expect(defaultCard("1", [{ id: 4 }])).toBe(4);
+      expect(defaultCard("1", [])).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

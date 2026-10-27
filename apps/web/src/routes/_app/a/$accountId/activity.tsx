@@ -41,6 +41,7 @@ import {
   type PageSize,
   parseActivitySearch,
 } from "../../../../lib/search.ts";
+import { defaultCard } from "../../../../lib/storage.ts";
 import {
   activitiesQuery,
   cardsQuery,
@@ -69,7 +70,7 @@ export const Route = createFileRoute("/_app/a/$accountId/activity")({
       queryClient.ensureQueryData(logicalCardsQuery(accountId)),
       queryClient.ensureQueryData(cardsQuery(accountId)),
     ]);
-    const id = deps.card ?? logicalCards[0]?.id;
+    const id = deps.card ?? defaultCard(accountId, logicalCards);
     if (id === undefined || !logicalCards.some((l) => l.id === id)) return;
     await queryClient.ensureQueryData(activitiesQuery(accountId, activitiesParams(id, deps), deps.cursor));
   },
@@ -82,7 +83,7 @@ function ActivityPage() {
   const navigate = Route.useNavigate();
   const { data: logicalCards } = useSuspenseQuery(logicalCardsQuery(accountId));
   const { data: cards } = useSuspenseQuery(cardsQuery(accountId));
-  const logical = logicalCards.find((l) => l.id === (search.card ?? logicalCards[0]?.id));
+  const logical = logicalCards.find((l) => l.id === (search.card ?? defaultCard(accountId, logicalCards)));
   const { activity, page, cursor, ...filters } = search;
   const params = logical && activitiesParams(logical.id, filters);
   const earlier = useRouterState({ select: (s) => s.location.state.activityCursors });
