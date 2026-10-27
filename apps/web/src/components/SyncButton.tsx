@@ -1,7 +1,7 @@
 import { Button, Group, Text, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, ok, type Sync } from "../api.ts";
 import { timeAgo } from "../lib/format.ts";
 import { accountQuery } from "../queries.ts";
@@ -58,7 +58,18 @@ export function SyncButton({ accountId }: { accountId: string }) {
   );
 }
 
+/** The current time, ticking every `ms`, so a relative time like "5 minutes ago" keeps up. */
+function useNow(ms: number) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), ms);
+    return () => clearInterval(timer);
+  }, [ms]);
+  return now;
+}
+
 function SyncStatus({ sync }: { sync: Sync | null }) {
+  const now = useNow(15_000);
   if (!sync) {
     return (
       <Text size="xs" c="dimmed" visibleFrom="md">
@@ -73,7 +84,7 @@ function SyncStatus({ sync }: { sync: Sync | null }) {
       </Text>
     );
   }
-  const when = timeAgo(sync.finishedAt ?? sync.startedAt);
+  const when = timeAgo(sync.finishedAt ?? sync.startedAt, now);
   if (sync.status === "failed") {
     return (
       <Tooltip label={sync.error ?? "No error was recorded"} multiline w={320}>

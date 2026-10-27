@@ -427,7 +427,6 @@ function PhysicalCards({
                 <Button
                   size="compact-xs"
                   variant="light"
-                  color="gray"
                   loading={separate.isPending && separate.variables === card.id}
                   onClick={() => separate.mutate(card.id)}
                 >
@@ -485,7 +484,7 @@ function OpeningBalance({ accountId, card, readOnly }: { accountId: string; card
         <Text size="sm" c="dimmed">
           Opening balance
         </Text>
-        <Text size="sm">{opening ? formatMoney(opening.cents) : "none"}</Text>
+        <Text size="sm">{opening ? formatMoney(opening.cents) : "---"}</Text>
         {opening && <OpeningBadge source={opening.source} />}
         {!readOnly && (
           <>
@@ -500,7 +499,6 @@ function OpeningBalance({ accountId, card, readOnly }: { accountId: string; card
               <Button
                 size="compact-xs"
                 variant="light"
-                color="gray"
                 loading={save.isPending}
                 onClick={() => save.mutate(null)}
               >

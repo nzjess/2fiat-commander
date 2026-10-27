@@ -1,4 +1,4 @@
-import { Stack, Text, Title } from "@mantine/core";
+import { Divider, Stack, Text, Title } from "@mantine/core";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { ReactNode } from "react";
@@ -53,7 +53,7 @@ function Insights() {
       />
       {logical ? (
         // Keyed by card, so each chart starts afresh for another card.
-        <Stack gap="lg" key={logical.id}>
+        <Stack gap="xl" key={logical.id}>
           <Section title="Spending">
             <SpendingChart accountId={accountId} logicalCardId={logical.id} />
           </Section>
@@ -77,9 +77,11 @@ function Insights() {
   );
 }
 
+/** A titled part of the page, set off from the one above by a rule (as on the card page). */
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <Stack gap="xs">
+      <Divider mb="sm" />
       <Title order={4}>{title}</Title>
       {children}
     </Stack>
