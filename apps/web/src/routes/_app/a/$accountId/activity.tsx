@@ -5,6 +5,7 @@ import {
   CloseButton,
   ColorSwatch,
   Group,
+  Input,
   MultiSelect,
   Pill,
   Select,
@@ -13,7 +14,8 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { useDebouncedCallback } from "@mantine/hooks";
+import { DatePickerInput } from "@mantine/dates";
+import { useDebouncedCallback, useMediaQuery } from "@mantine/hooks";
 import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useRouterState } from "@tanstack/react-router";
 import { useState } from "react";
@@ -22,11 +24,17 @@ import { ActivityDrawer } from "../../../../components/ActivityDrawer.tsx";
 import { ActivityTable } from "../../../../components/ActivityTable.tsx";
 import { CardPageHeader } from "../../../../components/CardPageHeader.tsx";
 import { ErrorView } from "../../../../components/status.tsx";
-import { ACTIVITY_KIND_LABELS, ACTIVITY_STATUS_LABELS, FINDING_KIND_LABELS } from "../../../../lib/format.ts";
+import {
+  ACTIVITY_KIND_LABELS,
+  ACTIVITY_STATUS_FILTERS,
+  FINDING_KIND_LABELS,
+  isoToLocalDate,
+} from "../../../../lib/format.ts";
 import {
   type ActivitySearch,
   activitiesParams,
   DEFAULT_PAGE_SIZE,
+  datePresets,
   PAGE_SIZES,
   type PageSize,
   parseActivitySearch,
@@ -167,12 +175,13 @@ function Filters({
 
   return (
     <Stack gap="xs">
-      <Group gap="sm" align="flex-end" wrap="wrap">
+      {/* One row, wrapping on a narrow screen, its labels in line however tall several kinds make Kind. */}
+      <Group gap="sm" align="flex-start" wrap="wrap">
         <MultiSelect
           size="xs"
           label="Kind"
-          // Takes the row's spare width, so several kinds fit, but its list needn't be as wide.
-          style={{ flex: 1, minWidth: 240 }}
+          // Takes the row's spare width, so the filters span the page; its list needn't be as wide.
+          style={{ flex: 1, minWidth: 260 }}
           comboboxProps={{ width: 280, position: "bottom-start" }}
           placeholder={search.kind ? undefined : "All kinds"}
           // Under the spending chart's groups, each with its colour dot, as the table draws kinds.
@@ -208,7 +217,7 @@ function Filters({
           w={200}
           label="Status"
           placeholder={search.status ? undefined : "All statuses"}
-          data={Object.entries(ACTIVITY_STATUS_LABELS).map(([value, label]) => ({ value, label }))}
+          data={Object.entries(ACTIVITY_STATUS_FILTERS).map(([value, label]) => ({ value, label }))}
           value={split(search.status)}
           onChange={(values) => update({ status: join(values) })}
           clearable
@@ -236,43 +245,25 @@ function Filters({
             )
           }
         />
-      </Group>
-      <Group gap="sm" align="flex-end">
-        <TextInput
-          size="xs"
-          type="date"
-          label="From"
-          value={search.from ?? ""}
-          onChange={(e) => update({ from: e.currentTarget.value || undefined })}
-        />
-        <TextInput
-          size="xs"
-          type="date"
-          label="To"
-          value={search.to ?? ""}
-          onChange={(e) => update({ to: e.currentTarget.value || undefined })}
-        />
-        <Switch
-          size="xs"
-          mb={6}
-          label="Hide fees"
-          checked={search.hideFees === true}
-          onChange={(e) =>
-            update(
-              e.currentTarget.checked
-                ? // Hidden fees can't also be chosen.
-                  { hideFees: true, kind: join(split(search.kind).filter((k) => k !== "fee")) }
-                : { hideFees: undefined },
-            )
-          }
-        />
-        <Switch
-          size="xs"
-          mb={6}
-          label="Stale holds only"
-          checked={search.stale === true}
-          onChange={(e) => update({ stale: e.currentTarget.checked || undefined })}
-        />
+        <DateRange from={search.from} to={search.to} onChange={(from, to) => update({ from, to })} />
+        {/* Labelled above, like the fields beside it, and centred in a field's height. */}
+        <Input.Wrapper size="xs" label="Hide fees" labelElement="div">
+          <Group h={30}>
+            <Switch
+              size="xs"
+              aria-label="Hide fees"
+              checked={search.hideFees === true}
+              onChange={(e) =>
+                update(
+                  e.currentTarget.checked
+                    ? // Hidden fees can't also be chosen.
+                      { hideFees: true, kind: join(split(search.kind).filter((k) => k !== "fee")) }
+                    : { hideFees: undefined },
+                )
+              }
+            />
+          </Group>
+        </Input.Wrapper>
       </Group>
       {search.finding !== undefined && (
         <FindingFilter
@@ -283,6 +274,60 @@ function Filters({
         />
       )}
     </Stack>
+  );
+}
+
+/**
+ * The date filter as one range, picked like a booking site's: a click for the first day, another for the last (the
+ * same day twice for one day), or a quick pick. The URL changes only once both ends are chosen, or on clearing.
+ */
+function DateRange({
+  from,
+  to,
+  onChange,
+}: {
+  from: string | undefined;
+  to: string | undefined;
+  onChange: (from: string | undefined, to: string | undefined) => void;
+}) {
+  const wide = useMediaQuery("(min-width: 48em)");
+  const [range, setRange] = useState<[string | null, string | null]>([from ?? null, to ?? null]);
+  // When the URL changes some other way (Back or Forward), the field follows it.
+  const [shown, setShown] = useState(`${from}|${to}`);
+  if (`${from}|${to}` !== shown) {
+    setShown(`${from}|${to}`);
+    setRange([from ?? null, to ?? null]);
+  }
+  const today = new Date();
+
+  return (
+    <DatePickerInput
+      type="range"
+      size="xs"
+      w={210}
+      label="Dates"
+      placeholder="Any time"
+      valueFormat="D MMM YYYY"
+      value={range}
+      onChange={(value) => {
+        setRange(value);
+        const [start, end] = value;
+        if (start && end) onChange(start, end);
+        else if (!start && !end) onChange(undefined, undefined);
+      }}
+      allowSingleDateInRange
+      maxDate={today}
+      numberOfColumns={wide ? 2 : 1}
+      // Opens on the range, or on last month and this one: there's nothing to pick after today.
+      defaultDate={
+        range[0] ??
+        isoToLocalDate(new Date(today.getFullYear(), today.getMonth() - (wide ? 1 : 0), 1).toISOString())
+      }
+      // Red weekends would read as a warning here.
+      weekendDays={[]}
+      presets={datePresets(today)}
+      clearable
+    />
   );
 }
 

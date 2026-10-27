@@ -58,6 +58,18 @@ export const ACTIVITY_STATUS_LABELS: Record<ActivityStatus, string> = {
   voided: "Voided",
 };
 
+/**
+ * The Activity page's status filter, as the table shows statuses: a stale hold (pending, but never posted) is its
+ * own, so pending means the rest.
+ */
+export const ACTIVITY_STATUS_FILTERS = {
+  pending: "Pending",
+  stale: "Stale",
+  settled: "Settled",
+  failed: "Failed",
+  voided: "Voided",
+} as const;
+
 export const ACTIVITY_FLAG_LABELS: Record<ActivityFlag, { label: string; description: string }> = {
   "amount-changed": {
     label: "Amount changed",

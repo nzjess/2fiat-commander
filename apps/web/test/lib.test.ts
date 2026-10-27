@@ -15,6 +15,7 @@ import {
 } from "../src/lib/format.ts";
 import {
   activitiesParams,
+  datePresets,
   parseActivitySearch,
   parseFindingsSearch,
   parseInsightsSearch,
@@ -145,11 +146,10 @@ describe("search params", () => {
       parseActivitySearch({
         card: "2",
         kind: "purchase,nope,fee,purchase",
-        status: "pending",
+        status: "stale,nope,pending",
         from: "2026-10-01",
         to: "2026-02-30",
         q: "  cafe ",
-        stale: true,
         hideFees: "true",
         finding: 9,
         activity: "41",
@@ -157,16 +157,15 @@ describe("search params", () => {
     ).toEqual({
       card: 2,
       kind: "purchase,fee",
-      status: "pending",
+      status: "stale,pending",
       from: "2026-10-01",
       q: "cafe",
-      stale: true,
       hideFees: true,
       finding: 9,
       activity: 41,
     });
     // The router reads a numeric search as a number.
-    expect(parseActivitySearch({ q: 1234, kind: "nope", stale: false })).toEqual({ q: "1234" });
+    expect(parseActivitySearch({ q: 1234, kind: "nope" })).toEqual({ q: "1234" });
     expect(parseActivitySearch({ q: "   ", status: 3 })).toEqual({});
     // Only the offered page sizes, and the default stays out of the URL.
     expect(parseActivitySearch({ size: "20" })).toEqual({ size: 20 });
@@ -183,17 +182,33 @@ describe("search params", () => {
     expect(parseActivitySearch({ page: 2, cursor: "not a cursor!" })).toEqual({});
   });
 
+  test("offers date range quick picks up to today, as local dates", () => {
+    const ranges = (now: Date) => Object.fromEntries(datePresets(now).map((p) => [p.label, p.value]));
+    expect(ranges(new Date(2026, 9, 27, 15))).toEqual({
+      "Last 7 days": ["2026-10-21", "2026-10-27"],
+      "Last 30 days": ["2026-09-28", "2026-10-27"],
+      "This month": ["2026-10-01", "2026-10-27"],
+      "Last month": ["2026-09-01", "2026-09-30"],
+      "This year": ["2026-01-01", "2026-10-27"],
+    });
+    // Early in January, the last month and the last days are last year's.
+    expect(ranges(new Date(2027, 0, 3, 9))).toMatchObject({
+      "Last 7 days": ["2026-12-28", "2027-01-03"],
+      "Last month": ["2026-12-01", "2026-12-31"],
+      "This year": ["2027-01-01", "2027-01-03"],
+    });
+  });
+
   test("turns activity filters into the server's query, with an exclusive end", () => {
     // The default page size is sent too: the server's own differs.
     expect(activitiesParams(5, {})).toEqual({ logicalCardId: "5", limit: "10" });
     expect(
       activitiesParams(5, {
         kind: "fee",
-        status: "pending,settled",
+        status: "stale,settled",
         from: "2026-10-01",
         to: "2026-10-26",
         q: "cafe",
-        stale: true,
         hideFees: true,
         finding: 9,
         size: 100,
@@ -202,11 +217,10 @@ describe("search params", () => {
     ).toEqual({
       logicalCardId: "5",
       kind: "fee",
-      status: "pending,settled",
+      status: "stale,settled",
       from: localDayStart("2026-10-01"),
       to: localDayStart("2026-10-27"),
       q: "cafe",
-      stale: "true",
       excludeKind: "fee",
       findingId: "9",
       limit: "100",

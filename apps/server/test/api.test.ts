@@ -609,7 +609,14 @@ describe("activities", () => {
     expect(await query({ kind: "fee,card_issue", excludeKind: "fee" })).toHaveLength(1);
     expect(await query({ q: "cafe" })).toEqual(["CAFE SPRINGFIELD USA"]);
     expect(await query({ q: "%" })).toEqual([]);
-    expect(await query({ stale: "true" })).toEqual(["KIOSK SPRINGFIELD USA"]);
+    // A stale hold is its own status: pending means the rest, and the statuses chosen combine.
+    expect(await query({ status: "stale" })).toEqual(["KIOSK SPRINGFIELD USA"]);
+    // The only pending row is the stale one.
+    expect(await query({ status: "pending" })).toEqual([]);
+    expect(await query({ status: "pending,stale" })).toEqual(["KIOSK SPRINGFIELD USA"]);
+    expect(await query({ status: "settled,stale" })).toEqual(
+      all.items.filter((a) => a.status === "settled" || a.stale).map((a) => a.description),
+    );
     expect(await query({ from: "2026-10-10T00:00:00.000Z", to: "2026-10-12T00:00:00.000Z" })).toHaveLength(2);
     const b = (await s.cardsByTwofiatId()).get(CARD_B);
     expect(await query({ cardId: String(b?.id) })).toEqual(["CAFE SPRINGFIELD USA"]);
@@ -624,7 +631,7 @@ describe("activities", () => {
 
   test("one activity comes with 2fiat's rows behind it and the findings that point at it", async () => {
     const s = await synced();
-    const list = await ok(s.account.activities.$get({ param: s.param, query: { stale: "true" } }));
+    const list = await ok(s.account.activities.$get({ param: s.param, query: { status: "stale" } }));
     const stale = list.items[0];
     const res = await s.account.activities[":activityId"].$get({
       param: { ...s.param, activityId: String(stale?.id) },

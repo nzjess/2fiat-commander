@@ -73,13 +73,16 @@ const ListQuery = z.object({
   kind: z.string().transform(list).optional(),
   /** Comma-separated kinds to leave out, e.g. `fee`. */
   excludeKind: z.string().transform(list).optional(),
+  /**
+   * Comma-separated, any of them matching. `stale` is a pending hold that never posted, and `pending` then means
+   * the rest, so each activity has exactly one, as the web app shows them.
+   */
   status: z.string().transform(list).optional(),
   /** occurred_at from this time (inclusive) up to `to` (exclusive). */
   from: z.iso.datetime().optional(),
   to: z.iso.datetime().optional(),
   /** Matches the description or the posted one. */
   q: z.string().trim().min(1).max(200).optional(),
-  stale: z.enum(["true", "false"]).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(50),
 });
@@ -128,7 +131,15 @@ export function activityRoutes(deps: AppDeps) {
                 ? notInArray(activities.kind, query.excludeKind as ActivityRow["kind"][])
                 : undefined,
               query.status?.length
-                ? inArray(activities.status, query.status as ActivityRow["status"][])
+                ? or(
+                    ...query.status.map((status) =>
+                      status === "stale"
+                        ? isStale
+                        : status === "pending"
+                          ? and(eq(activities.status, "pending"), sql`NOT (${isStale})`)
+                          : eq(activities.status, status as ActivityRow["status"]),
+                    ),
+                  )
                 : undefined,
               query.from === undefined ? undefined : gte(activities.occurredAt, query.from),
               query.to === undefined ? undefined : lt(activities.occurredAt, query.to),
@@ -138,11 +149,6 @@ export function activityRoutes(deps: AppDeps) {
                     sql`${activities.postedDescription} LIKE ${pattern} ESCAPE '\\'`,
                   )
                 : undefined,
-              query.stale === undefined
-                ? undefined
-                : query.stale === "true"
-                  ? isStale
-                  : sql`NOT (${isStale})`,
               cursor === undefined
                 ? undefined
                 : or(

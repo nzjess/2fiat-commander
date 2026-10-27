@@ -1,7 +1,7 @@
 // Typed search params. The router hands over whatever the URL held (numbers already parsed from JSON), so each
 // parser keeps only well-formed values and drops the rest.
 
-import { ACTIVITY_KIND_LABELS, ACTIVITY_STATUS_LABELS, localDayStart } from "./format.ts";
+import { ACTIVITY_KIND_LABELS, ACTIVITY_STATUS_FILTERS, isoToLocalDate, localDayStart } from "./format.ts";
 
 // Open means not explained yet; explained findings are still unresolved.
 export const FINDING_STATUSES = ["open", "explained", "resolved", "all"] as const;
@@ -52,14 +52,12 @@ export interface ActivitySearch {
   card?: number;
   /** Activity kinds, comma-separated, as the server takes them. */
   kind?: string;
-  /** Activity statuses, comma-separated. */
+  /** Activity statuses, comma-separated, any of them matching; "stale" among them (see `ACTIVITY_STATUS_FILTERS`). */
   status?: string;
   /** Local dates like "2026-10-26", both inclusive. */
   from?: string;
   to?: string;
   q?: string;
-  /** Only holds that never posted. */
-  stale?: true;
   /** Leave fee rows out: each purchase has one, so they double the list. */
   hideFees?: true;
   /** Only the activities this finding points at. */
@@ -93,11 +91,10 @@ export function parseActivitySearch(raw: Record<string, unknown>): ActivitySearc
   const fields: ActivitySearch = {
     card: positiveInt(raw.card),
     kind: knownList(raw.kind, Object.keys(ACTIVITY_KIND_LABELS)),
-    status: knownList(raw.status, Object.keys(ACTIVITY_STATUS_LABELS)),
+    status: knownList(raw.status, Object.keys(ACTIVITY_STATUS_FILTERS)),
     from: localDate(raw.from),
     to: localDate(raw.to),
     q: q || undefined,
-    stale: raw.stale === true || raw.stale === "true" ? true : undefined,
     hideFees: raw.hideFees === true || raw.hideFees === "true" ? true : undefined,
     finding: positiveInt(raw.finding),
     size: PAGE_SIZES.find((n) => n === positiveInt(raw.size) && n !== DEFAULT_PAGE_SIZE),
@@ -106,6 +103,22 @@ export function parseActivitySearch(raw: Record<string, unknown>): ActivitySearc
     activity: positiveInt(raw.activity),
   };
   return Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
+}
+
+/** The date range filter's quick picks, as local dates ("2026-10-26"), both ends inclusive, up to `now`'s day. */
+export function datePresets(now: Date): { label: string; value: [string, string] }[] {
+  const [y, m, d] = [now.getFullYear(), now.getMonth(), now.getDate()];
+  // Built from calendar fields, so month ends and daylight saving come out right.
+  const day = (year: number, month: number, date: number) =>
+    isoToLocalDate(new Date(year, month, date).toISOString());
+  const today = day(y, m, d);
+  return [
+    { label: "Last 7 days", value: [day(y, m, d - 6), today] },
+    { label: "Last 30 days", value: [day(y, m, d - 29), today] },
+    { label: "This month", value: [day(y, m, 1), today] },
+    { label: "Last month", value: [day(y, m - 1, 1), day(y, m, 0)] },
+    { label: "This year", value: [day(y, 0, 1), today] },
+  ];
 }
 
 /** The activities endpoint's query for a logical card and the page's filters (`to` becomes exclusive). */
@@ -117,7 +130,6 @@ export function activitiesParams(logicalCardId: number, search: ActivitySearch):
     from: search.from && localDayStart(search.from),
     to: search.to && localDayStart(search.to, 1),
     q: search.q,
-    stale: search.stale && "true",
     excludeKind: search.hideFees && "fee",
     findingId: search.finding === undefined ? undefined : String(search.finding),
     limit: String(search.size ?? DEFAULT_PAGE_SIZE),
