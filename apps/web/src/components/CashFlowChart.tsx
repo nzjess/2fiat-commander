@@ -128,11 +128,6 @@ export function CashFlowChart({ accountId, logicalCardId }: { accountId: string;
         <Text size="sm">
           Net <b>{money.format(sum.netCents, { signed: true })}</b>
         </Text>
-        {money.converts && (
-          <Text size="xs" c="dimmed">
-            Converted from USD at each day's rate, so approximate
-          </Text>
-        )}
       </Group>
       <BarChart
         h={280}

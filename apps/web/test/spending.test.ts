@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { CATEGORY_COLORS, CATEGORY_PALETTE } from "../src/lib/categories.ts";
 import {
+  chosenFlows,
   defaultSpendingBucket,
   MAX_CATEGORIES,
   type SpendingFlow,
@@ -59,16 +60,21 @@ describe("spending", () => {
       flow(5, "purchase", -(i + 1) * 100, i + 1),
     );
     const { keys, fold } = spendingSeries(spendingTotals(many, undefined, t(30)));
-    expect(keys).toEqual([10, 9, 8, 7, 6, 5, 4, "other"]);
-    expect(fold(3)).toBe("other");
+    expect(keys).toEqual([10, 9, 8, 7, 6, 5, 4, 3, "other"]);
+    expect(fold(2)).toBe("other");
     expect(fold(10)).toBe(10);
     expect(fold("fees")).toBe("fees");
     const totals = spendingTotals(many, undefined, t(30));
-    expect(seriesTotal(totals, fold, "other")).toBe(100 + 200 + 300);
+    expect(seriesTotal(totals, fold, "other")).toBe(100 + 200);
     expect(seriesTotal(totals, fold, 10)).toBe(1_000);
     // Exactly the limit needs no "other".
     const eight = many.slice(0, MAX_CATEGORIES);
     expect(spendingSeries(spendingTotals(eight, undefined, t(30))).keys).toHaveLength(MAX_CATEGORIES);
+    // A lower limit, as on the card page.
+    expect(spendingSeries(totals, 4).keys).toEqual([10, 9, 8, 7, "other"]);
+    expect(seriesTotal(totals, spendingSeries(totals, 4).fold, "other")).toBe(
+      100 + 200 + 300 + 400 + 500 + 600,
+    );
   });
 
   test("rows per period, empty ones included, from the range's start", () => {
@@ -86,6 +92,19 @@ describe("spending", () => {
       { t: t(12) },
     ]);
     expect(spendingRows([], "day", fold, undefined, t(8))).toEqual([]);
+  });
+
+  test("narrows to the chosen series, all of them when none are", () => {
+    expect(chosenFlows(flows, [])).toBe(flows);
+    expect(Object.fromEntries(spendingTotals(chosenFlows(flows, ["c1", "fees"]), undefined, t(30)))).toEqual({
+      1: 600,
+      fees: 100,
+    });
+    expect(
+      Object.fromEntries(spendingTotals(chosenFlows(flows, ["uncategorised"]), undefined, t(30))),
+    ).toEqual({
+      uncategorised: 300,
+    });
   });
 
   test("groups a range by day, week or month, never per activity", () => {

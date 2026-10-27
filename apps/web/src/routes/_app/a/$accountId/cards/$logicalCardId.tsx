@@ -20,10 +20,10 @@ import { ActivityTable } from "../../../../../components/ActivityTable.tsx";
 import { AdjustmentList } from "../../../../../components/Adjustments.tsx";
 import { CardFace } from "../../../../../components/CardFace.tsx";
 import { CardSelect } from "../../../../../components/CardPageHeader.tsx";
-import { CashFlowChart } from "../../../../../components/CashFlowChart.tsx";
 import { FindingList } from "../../../../../components/FindingList.tsx";
 import { AnchorLink } from "../../../../../components/links.tsx";
 import { Amount } from "../../../../../components/Money.tsx";
+import { SpendingChart } from "../../../../../components/SpendingChart.tsx";
 import { GapBadge, MissingBadge, OpeningBadge, TransientBadge } from "../../../../../components/status.tsx";
 import {
   cardLabel,
@@ -42,6 +42,7 @@ import {
   adjustmentsQuery,
   cardsQuery,
   cashFlowQuery,
+  categoriesQuery,
   findingsQuery,
   logicalCardsQuery,
 } from "../../../../../queries.ts";
@@ -61,6 +62,7 @@ export const Route = createFileRoute("/_app/a/$accountId/cards/$logicalCardId")(
       queryClient.ensureQueryData(findingsQuery(accountId, { card: id })),
       queryClient.ensureQueryData(adjustmentsQuery(accountId, id)),
       queryClient.ensureQueryData(cashFlowQuery(accountId, id)),
+      queryClient.ensureQueryData(categoriesQuery),
       queryClient.ensureQueryData(recentQuery(accountId, id)),
     ]);
   },
@@ -130,14 +132,14 @@ function LogicalCardPage() {
       <Balances logical={logical} current={current} />
 
       <Section
-        title="Cash flow"
+        title="Spending by category"
         action={
           <AnchorLink to="/a/$accountId/insights" params={{ accountId }} search={{ card: id }} size="sm">
             More insights
           </AnchorLink>
         }
       >
-        <CashFlowChart accountId={accountId} logicalCardId={id} />
+        <SpendingChart accountId={accountId} logicalCardId={id} compact />
       </Section>
 
       <Section

@@ -57,11 +57,11 @@ function Insights() {
       {logical ? (
         // Keyed by card, so each chart starts afresh for another card.
         <Stack gap="xl" key={logical.id}>
-          <Section title="Cash flow">
-            <CashFlowChart accountId={accountId} logicalCardId={logical.id} />
-          </Section>
           <Section title="Spending by category">
             <SpendingChart accountId={accountId} logicalCardId={logical.id} />
+          </Section>
+          <Section title="Cash flow">
+            <CashFlowChart accountId={accountId} logicalCardId={logical.id} />
           </Section>
           <Section title="Balance over time">
             <BalanceChart accountId={accountId} logicalCardId={logical.id} />

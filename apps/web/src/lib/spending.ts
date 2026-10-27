@@ -14,7 +14,10 @@ export interface SpendingFlow {
 /** A spending series: a category's id, or one of the neutral ones. */
 export type SeriesKey = number | "fees" | "uncategorised" | "other";
 
-/** At most this many categories have a series of their own; the rest fold into "other". */
+/**
+ * By default, the most this many categories have a series of their own; the rest fold into "other". Eight, as the
+ * palette has eight colours (Other is grey).
+ */
 export const MAX_CATEGORIES = 8;
 
 export type SpendingBucket = Exclude<Bucket, "none">;
@@ -24,6 +27,19 @@ const SPENDING_KINDS = new Set(["purchase", "refund", "fee"]);
 function seriesOf(flow: SpendingFlow): SeriesKey {
   if (flow.kind === "fee") return "fees";
   return flow.categoryId ?? "uncategorised";
+}
+
+/**
+ * Only the flows in the chosen series (as `seriesName`s: a category's `c<id>`, "uncategorised" or "fees"); all of
+ * them when none are chosen. Applied before folding, so the categories kept get series of their own.
+ */
+export function chosenFlows<F extends SpendingFlow>(
+  flows: readonly F[],
+  chosen: readonly string[],
+): readonly F[] {
+  if (chosen.length === 0) return flows;
+  const names = new Set(chosen);
+  return flows.filter((f) => !SPENDING_KINDS.has(f.kind) || names.has(seriesName(seriesOf(f))));
 }
 
 function inRange(flows: readonly SpendingFlow[], from: number | undefined, now: number) {
@@ -48,11 +64,14 @@ export function spendingTotals(
 }
 
 /**
- * The series to show, in order: the categories by what was spent (most first), up to `MAX_CATEGORIES`, then
- * "other" for the rest, then uncategorised and fees. Series that net to nothing are left out. `fold` maps a
- * category's id to the series it's shown in.
+ * The series to show, in order: the top `max` categories by what was spent (most first), then "other" for the
+ * rest, then uncategorised and fees. Series that net to nothing are left out. `fold` maps a category's id to the
+ * series it's shown in.
  */
-export function spendingSeries(totals: ReadonlyMap<SeriesKey, number>): {
+export function spendingSeries(
+  totals: ReadonlyMap<SeriesKey, number>,
+  max = MAX_CATEGORIES,
+): {
   keys: SeriesKey[];
   fold: (key: SeriesKey) => SeriesKey;
 } {
@@ -60,9 +79,7 @@ export function spendingSeries(totals: ReadonlyMap<SeriesKey, number>): {
     .filter((e): e is [number, number] => typeof e[0] === "number" && e[1] !== 0)
     .sort((a, b) => b[1] - a[1] || a[0] - b[0])
     .map(([id]) => id);
-  const own = new Set(
-    categories.length > MAX_CATEGORIES ? categories.slice(0, MAX_CATEGORIES - 1) : categories,
-  );
+  const own = new Set(categories.slice(0, max));
   const fold = (key: SeriesKey): SeriesKey => (typeof key === "number" && !own.has(key) ? "other" : key);
   const keys: SeriesKey[] = [...own];
   if (own.size < categories.length) keys.push("other");
