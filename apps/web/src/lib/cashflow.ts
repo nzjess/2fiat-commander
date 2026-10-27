@@ -81,7 +81,8 @@ export function periodStart(t: number, bucket: Exclude<Bucket, "none">): number 
   return day.getTime();
 }
 
-function nextPeriod(start: number, bucket: Exclude<Bucket, "none">): number {
+/** The start of the period after the one starting at `start`. */
+export function nextPeriod(start: number, bucket: Exclude<Bucket, "none">): number {
   const d = new Date(start);
   if (bucket === "month") return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + (bucket === "week" ? 7 : 1)).getTime();

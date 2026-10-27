@@ -1,19 +1,24 @@
-import { Select, Stack, Text, Title } from "@mantine/core";
+import { Divider, Select, Stack, Text, Title } from "@mantine/core";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { api, ok } from "../../api.ts";
+import { CategoryManager } from "../../components/Categories.tsx";
 import { ErrorView } from "../../components/status.tsx";
 import { formatDate } from "../../lib/format.ts";
-import { fxQuery, meQuery } from "../../queries.ts";
+import { categoriesQuery, fxQuery, meQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/_app/settings")({
-  loader: ({ context }) => context.queryClient.ensureQueryData(fxQuery),
+  loader: ({ context }) =>
+    Promise.all([
+      context.queryClient.ensureQueryData(fxQuery),
+      context.queryClient.ensureQueryData(categoriesQuery),
+    ]),
   component: Settings,
 });
 
 const currencyNames = new Intl.DisplayNames("en", { type: "currency" });
 
-/** The user's own settings: for now, the currency amounts are shown in. */
+/** The user's own settings: the currency amounts are shown in, and their categories. */
 function Settings() {
   const { data: fx } = useSuspenseQuery(fxQuery);
   const queryClient = useQueryClient();
@@ -54,6 +59,13 @@ function Settings() {
           ? `Latest rates: ${formatDate(`${fx.latestDay}T12:00:00Z`)}.`
           : "No exchange rates have been fetched yet, so amounts show in US dollars."}
       </Text>
+      <Divider my="sm" />
+      <Title order={4}>Categories</Title>
+      <Text size="sm" c="dimmed">
+        What your spending went on: purchases take a category, and refunds count back against theirs. Your
+        categories are shared by all your accounts.
+      </Text>
+      <CategoryManager />
     </Stack>
   );
 }

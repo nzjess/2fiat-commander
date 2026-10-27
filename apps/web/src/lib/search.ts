@@ -54,6 +54,8 @@ export interface ActivitySearch {
   kind?: string;
   /** Activity statuses, comma-separated, any of them matching; "stale" among them (see `ACTIVITY_STATUS_FILTERS`). */
   status?: string;
+  /** Category ids, comma-separated, any of them matching; "none" for uncategorised spending. */
+  category?: string;
   /** Local dates like "2026-10-26", both inclusive. */
   from?: string;
   to?: string;
@@ -78,6 +80,14 @@ function knownList(value: unknown, known: readonly string[]): string | undefined
   return items.length ? items.join(",") : undefined;
 }
 
+/** Category ids and "none", comma-separated, deduplicated; undefined if none. A single id may arrive as a number. */
+function categoryList(value: unknown): string | undefined {
+  const text = typeof value === "number" ? String(value) : value;
+  if (typeof text !== "string") return undefined;
+  const items = [...new Set(text.split(",").filter((v) => v === "none" || positiveInt(v) !== undefined))];
+  return items.length ? items.join(",") : undefined;
+}
+
 const localDate = (value: unknown) =>
   typeof value === "string" && localDayStart(value) !== undefined ? value : undefined;
 
@@ -92,6 +102,7 @@ export function parseActivitySearch(raw: Record<string, unknown>): ActivitySearc
     card: positiveInt(raw.card),
     kind: knownList(raw.kind, Object.keys(ACTIVITY_KIND_LABELS)),
     status: knownList(raw.status, Object.keys(ACTIVITY_STATUS_FILTERS)),
+    category: categoryList(raw.category),
     from: localDate(raw.from),
     to: localDate(raw.to),
     q: q || undefined,
@@ -127,6 +138,7 @@ export function activitiesParams(logicalCardId: number, search: ActivitySearch):
     logicalCardId: String(logicalCardId),
     kind: search.kind,
     status: search.status,
+    category: search.category,
     from: search.from && localDayStart(search.from),
     to: search.to && localDayStart(search.to, 1),
     q: search.q,

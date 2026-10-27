@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import type { Db } from "./db/db.ts";
-import { activities, cards } from "./db/schema.ts";
+import { activities, activityAnnotations, cards } from "./db/schema.ts";
 
 /** One movement of money on a logical card. */
 export interface Flow {
@@ -12,6 +12,8 @@ export interface Flow {
   /** Signed: negative is money out. */
   amountCents: number;
   description: string;
+  /** Set on spending only (`CATEGORY_KINDS`). */
+  categoryId: number | null;
 }
 
 /**
@@ -36,9 +38,11 @@ export function cashFlow(db: Db, accountId: number, logicalCardId: number): Flow
       status: activities.status,
       amountCents: activities.amountCents,
       description: activities.description,
+      categoryId: activityAnnotations.categoryId,
       counterpartCardId: activities.counterpartCardId,
     })
     .from(activities)
+    .leftJoin(activityAnnotations, eq(activityAnnotations.activityId, activities.id))
     .where(and(inArray(activities.cardId, ids), ne(activities.amountCents, 0)))
     .orderBy(asc(activities.occurredAt), asc(activities.id))
     .all()

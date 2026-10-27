@@ -18,6 +18,12 @@ export const fxQuery = queryOptions({
   staleTime: 3_600_000,
 });
 
+/** The user's categories, shared by all their accounts. */
+export const categoriesQuery = queryOptions({
+  queryKey: ["categories"],
+  queryFn: () => ok(api.categories.$get()),
+});
+
 export const accountsQuery = queryOptions({
   queryKey: ["accounts", "list"],
   queryFn: () => ok(api.accounts.$get()),
@@ -67,6 +73,18 @@ export const activityQuery = (accountId: string, activityId: number) =>
     queryKey: ["accounts", accountId, "activities", activityId],
     queryFn: () =>
       ok(account.activities[":activityId"].$get({ param: { accountId, activityId: String(activityId) } })),
+  });
+
+/** The account's other uncategorised spending from the same merchant as the activity. */
+export const sameMerchantQuery = (accountId: string, activityId: number) =>
+  queryOptions({
+    queryKey: ["accounts", accountId, "activities", activityId, "same-merchant"],
+    queryFn: () =>
+      ok(
+        account.activities[":activityId"]["same-merchant"].$get({
+          param: { accountId, activityId: String(activityId) },
+        }),
+      ),
   });
 
 export const cashFlowQuery = (accountId: string, logicalCardId: number) =>

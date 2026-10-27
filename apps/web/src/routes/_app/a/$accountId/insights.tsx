@@ -6,11 +6,13 @@ import { BalanceChart } from "../../../../components/BalanceChart.tsx";
 import { CardPageHeader } from "../../../../components/CardPageHeader.tsx";
 import { CashFlowChart } from "../../../../components/CashFlowChart.tsx";
 import { FeesPanel } from "../../../../components/FeeSchedules.tsx";
+import { SpendingChart } from "../../../../components/SpendingChart.tsx";
 import { parseInsightsSearch } from "../../../../lib/search.ts";
 import {
   accountQuery,
   balanceHistoryQuery,
   cashFlowQuery,
+  categoriesQuery,
   feeSchedulesQuery,
   feesQuery,
   logicalCardsQuery,
@@ -29,6 +31,7 @@ export const Route = createFileRoute("/_app/a/$accountId/insights")({
       queryClient.ensureQueryData(balanceHistoryQuery(accountId, id)),
       queryClient.ensureQueryData(feesQuery(accountId, id)),
       queryClient.ensureQueryData(feeSchedulesQuery(accountId)),
+      queryClient.ensureQueryData(categoriesQuery),
     ]);
   },
   component: Insights,
@@ -56,6 +59,9 @@ function Insights() {
         <Stack gap="xl" key={logical.id}>
           <Section title="Cash flow">
             <CashFlowChart accountId={accountId} logicalCardId={logical.id} />
+          </Section>
+          <Section title="Spending by category">
+            <SpendingChart accountId={accountId} logicalCardId={logical.id} />
           </Section>
           <Section title="Balance over time">
             <BalanceChart accountId={accountId} logicalCardId={logical.id} />

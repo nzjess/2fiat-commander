@@ -1,7 +1,10 @@
 import { Badge, ColorSwatch, Group, Table, Text, Tooltip } from "@mantine/core";
+import { useQuery } from "@tanstack/react-query";
 import type { Activity, ActivityKind, Card, LogicalCard } from "../api.ts";
 import { groupColor } from "../lib/cashflow.ts";
 import { ACTIVITY_KIND_LABELS, ACTIVITY_STATUS_LABELS, formatDateTime, lastFour } from "../lib/format.ts";
+import { categoriesQuery } from "../queries.ts";
+import { CategoryLabel } from "./Categories.tsx";
 import { Amount } from "./Money.tsx";
 
 /**
@@ -102,9 +105,11 @@ export function ActivityTable({
   onOpen: (activityId: number) => void;
 }) {
   const byId = new Map(cards.map((c) => [c.id, c]));
+  const { data: categories = [] } = useQuery(categoriesQuery);
+  const categoryById = new Map(categories.map((c) => [c.id, c]));
   const several = logical.cardIds.length > 1;
   return (
-    <Table.ScrollContainer minWidth={960}>
+    <Table.ScrollContainer minWidth={1100}>
       {/* Fixed widths, so the columns don't move with what a page holds; the description takes the rest. */}
       <Table highlightOnHover verticalSpacing={6} layout="fixed">
         <Table.Thead>
@@ -112,6 +117,7 @@ export function ActivityTable({
             <Table.Th w={170}>When</Table.Th>
             <Table.Th>Description</Table.Th>
             <Table.Th w={230}>Kind</Table.Th>
+            <Table.Th w={150}>Category</Table.Th>
             <Table.Th w={100}>Status</Table.Th>
             <Table.Th w={130} ta="right">
               Amount
@@ -125,6 +131,7 @@ export function ActivityTable({
         <Table.Tbody>
           {activities.map((a) => {
             const card = byId.get(a.cardId);
+            const category = a.categoryId === null ? undefined : categoryById.get(a.categoryId);
             return (
               <Table.Tr
                 key={a.id}
@@ -137,9 +144,12 @@ export function ActivityTable({
                 </Table.Td>
                 <Table.Td>
                   {/* One line, so every row has the same height; the drawer shows what it posted as. */}
-                  <Text size="sm" lineClamp={1}>
-                    {a.description}
-                  </Text>
+                  <Group gap={6} wrap="nowrap">
+                    <Text size="sm" lineClamp={1}>
+                      {a.description}
+                    </Text>
+                    {a.note && <NoteMark note={a.note} />}
+                  </Group>
                 </Table.Td>
                 <Table.Td>
                   <Group gap={4} wrap="nowrap">
@@ -152,6 +162,17 @@ export function ActivityTable({
                       </Tooltip>
                     )}
                   </Group>
+                </Table.Td>
+                <Table.Td>
+                  {category ? (
+                    <CategoryLabel category={category} />
+                  ) : (
+                    a.categorizable && (
+                      <Text size="sm" c="dimmed">
+                        —
+                      </Text>
+                    )
+                  )}
                 </Table.Td>
                 <Table.Td>
                   <ActivityStatusBadge activity={a} />
@@ -179,5 +200,27 @@ export function ActivityTable({
         </Table.Tbody>
       </Table>
     </Table.ScrollContainer>
+  );
+}
+
+/** Marks an activity with a note, which shows on hover. */
+function NoteMark({ note }: { note: string }) {
+  return (
+    <Tooltip label={note} multiline maw={320} style={{ whiteSpace: "pre-wrap" }}>
+      <svg
+        role="img"
+        aria-label="Has a note"
+        width={14}
+        height={14}
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="var(--mantine-color-dimmed)"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        style={{ flexShrink: 0 }}
+      >
+        <path d="M3 2.5h10v8l-3 3H3z M10 13.5v-3h3 M5.5 6h5 M5.5 8.5h3" />
+      </svg>
+    </Tooltip>
   );
 }

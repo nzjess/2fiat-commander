@@ -15,7 +15,14 @@ import { describe, expect, test } from "vitest";
 import { type App, createApp } from "../src/app.ts";
 import { createUser, hashPassword } from "../src/auth.ts";
 import { openDb } from "../src/db/db.ts";
-import { accounts, cards as cardsTable, fxRates, sessions, syncs } from "../src/db/schema.ts";
+import {
+  accounts,
+  activityAnnotations,
+  cards as cardsTable,
+  fxRates,
+  sessions,
+  syncs,
+} from "../src/db/schema.ts";
 import { markForRebuild } from "../src/ledger.ts";
 import { reevaluate } from "../src/reevaluate.ts";
 import { Secrets } from "../src/secrets.ts";
@@ -647,6 +654,156 @@ describe("activities", () => {
     expect(
       (await s.account.activities[":activityId"].$get({ param: { ...s.param, activityId: "999" } })).status,
     ).toBe(404);
+  });
+});
+
+describe("categories and notes", () => {
+  test("a user's categories are shared by their accounts, with colours, usage counts and unique names", async () => {
+    const s = await synced();
+    const cats = s.api.categories;
+    const groceries = await ok(cats.$post({ json: { name: "Groceries" } }));
+    const travel = await ok(cats.$post({ json: { name: "  Travel " } }));
+    const eating = await ok(cats.$post({ json: { name: "eating out", color: "blue" } }));
+    // Each takes the palette's least-used colour, unless one is given.
+    expect([groceries.color, travel.color, eating.color]).toEqual(["blue", "orange", "blue"]);
+    expect(travel.name).toBe("Travel");
+    expect((await ok(cats.$post({ json: { name: "Fun" } }))).color).toBe("aqua");
+    expect((await cats.$post({ json: { name: "groceries" } })).status).toBe(409);
+    expect((await cats.$post({ json: { name: "X", color: "teal" as never } })).status).toBe(400);
+    expect((await cats.$post({ json: { name: " " } })).status).toBe(400);
+
+    const one = cats[":categoryId"];
+    const param = (c: { id: number }) => ({ param: { categoryId: String(c.id) } });
+    expect((await one.$patch({ ...param(travel), json: { name: "GROCERIES" } })).status).toBe(409);
+    expect(await ok(one.$patch({ ...param(travel), json: { name: "Trips", color: "red" } }))).toMatchObject({
+      name: "Trips",
+      color: "red",
+    });
+    // Renaming to itself in another case is fine.
+    expect((await ok(one.$patch({ ...param(groceries), json: { name: "groceries" } }))).name).toBe(
+      "groceries",
+    );
+    expect((await ok(cats.$get())).map((c) => c.name)).toEqual(["eating out", "Fun", "groceries", "Trips"]);
+
+    // Another user sees none of them, and can't change them.
+    await createUser(s.db, "other", await hashPassword(PASSWORD));
+    const other = client(s.app);
+    await other.api.auth.login.$post({ json: { username: "other", password: PASSWORD } });
+    expect(await ok(other.api.categories.$get())).toEqual([]);
+    expect((await other.api.categories[":categoryId"].$delete(param(travel))).status).toBe(404);
+    expect((await client(s.app).api.categories.$get()).status).toBe(401);
+  });
+
+  test("spending takes a category, anything takes a note, and both filter and search", async () => {
+    const s = await synced();
+    const groceries = await ok(s.api.categories.$post({ json: { name: "Groceries" } }));
+    const activities = s.account.activities;
+    const all = (await ok(activities.$get({ param: s.param, query: {} }))).items;
+    const byDescription = (d: string) => all.find((a) => a.description === d) as (typeof all)[number];
+    const shop = byDescription("SHOP SPRINGFIELD USA");
+    const fee = all.find((a) => a.kind === "fee") as (typeof all)[number];
+    expect(shop).toMatchObject({ categorizable: true, categoryId: null, note: null });
+    expect(fee.categorizable).toBe(false);
+
+    const annotate = (a: { id: number }, json: { categoryId?: number | null; note?: string | null }) =>
+      activities[":activityId"].annotation.$patch({ param: { ...s.param, activityId: String(a.id) }, json });
+    expect(await ok(annotate(shop, { categoryId: groceries.id }))).toMatchObject({
+      categoryId: groceries.id,
+    });
+    // Each change leaves the other field alone.
+    expect(await ok(annotate(shop, { note: "  milk and eggs " }))).toMatchObject({
+      categoryId: groceries.id,
+      note: "milk and eggs",
+    });
+    expect((await annotate(fee, { categoryId: groceries.id })).status).toBe(400);
+    expect(await ok(annotate(fee, { note: "every purchase has one" }))).toMatchObject({
+      note: "every purchase has one",
+    });
+    expect((await annotate(shop, { categoryId: 999 })).status).toBe(400);
+    expect((await annotate(shop, { note: "x".repeat(2001) })).status).toBe(400);
+
+    const query = async (q: Record<string, string>) =>
+      (await ok(activities.$get({ param: s.param, query: q }))).items.map((a) => a.description);
+    expect(await query({ category: String(groceries.id) })).toEqual(["SHOP SPRINGFIELD USA"]);
+    // Uncategorised means spending only: the fee and the card issue aren't in it.
+    expect(await query({ category: "none" })).toEqual(["CAFE SPRINGFIELD USA", "KIOSK SPRINGFIELD USA"]);
+    expect(await query({ category: `none,${groceries.id}` })).toHaveLength(3);
+    expect((await activities.$get({ param: s.param, query: { category: "abc" } })).status).toBe(400);
+    expect(await query({ q: "eggs" })).toEqual(["SHOP SPRINGFIELD USA"]);
+    const detail = await ok(
+      activities[":activityId"].$get({ param: { ...s.param, activityId: String(shop.id) } }),
+    );
+    expect(detail).toMatchObject({ categoryId: groceries.id, note: "milk and eggs" });
+    expect((await ok(s.api.categories.$get()))[0]?.activityCount).toBe(1);
+
+    // Clearing both deletes the annotation; a full rebuild keeps them.
+    await ok(annotate(fee, { note: null }));
+    expect(s.db.select().from(activityAnnotations).all()).toHaveLength(1);
+    markForRebuild(s.db, s.accountId);
+    await s.runner.sync(s.accountId, "manual");
+    expect(await query({ category: String(groceries.id) })).toEqual(["SHOP SPRINGFIELD USA"]);
+
+    // Deleting the category makes its activities uncategorised, and keeps their notes.
+    expect(
+      (await s.api.categories[":categoryId"].$delete({ param: { categoryId: String(groceries.id) } })).status,
+    ).toBe(204);
+    expect(
+      await ok(activities[":activityId"].$get({ param: { ...s.param, activityId: String(shop.id) } })),
+    ).toMatchObject({
+      categoryId: null,
+      note: "milk and eggs",
+    });
+  });
+
+  test("a category can be set on the other uncategorised purchases from the same merchant", async () => {
+    const s = await synced();
+    s.twofiat.state.transactions.push(
+      authorization({
+        card: CARD_B,
+        at: "2026-10-18T08:00:00.000Z",
+        amount: "-3.00",
+        description: "SHOP SPRINGFIELD USA",
+      }),
+      authorization({
+        card: CARD_A,
+        at: "2026-10-18T09:00:00.000Z",
+        amount: "-4.00",
+        description: "SHOP 0042 SPRINGFIELD USA",
+      }),
+      authorization({
+        card: CARD_A,
+        at: "2026-10-18T10:00:00.000Z",
+        amount: "-5.00",
+        description: "SHOPPING SPRINGFIELD USA",
+      }),
+    );
+    await s.runner.sync(s.accountId, "manual");
+    const groceries = await ok(s.api.categories.$post({ json: { name: "Groceries" } }));
+    const activities = s.account.activities;
+    const all = (await ok(activities.$get({ param: s.param, query: {} }))).items;
+    const shops = all.filter((a) => a.description.startsWith("SHOP "));
+    const first = shops.at(-1) as (typeof all)[number];
+    const same = async () =>
+      (
+        await ok(
+          activities[":activityId"]["same-merchant"].$get({
+            param: { ...s.param, activityId: String(first.id) },
+          }),
+        )
+      ).activityIds;
+    // Across cards, newest first, with references left out of the match, and never itself.
+    expect(await same()).toEqual(shops.slice(0, -1).map((a) => a.id));
+
+    const categorize = (json: { activityIds: number[]; categoryId: number }) =>
+      activities.categorize.$post({ param: s.param, json });
+    const fee = all.find((a) => a.kind === "fee") as (typeof all)[number];
+    expect((await categorize({ activityIds: [fee.id], categoryId: groceries.id })).status).toBe(400);
+    expect((await categorize({ activityIds: [999], categoryId: groceries.id })).status).toBe(400);
+    expect(await ok(categorize({ activityIds: await same(), categoryId: groceries.id }))).toEqual({
+      count: 2,
+    });
+    // Categorised ones are no longer offered.
+    expect(await same()).toEqual([]);
   });
 });
 

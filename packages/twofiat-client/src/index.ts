@@ -16,7 +16,7 @@ export {
   type TransactionFeeSchedule,
 } from "./normalize/reconcile.ts";
 export { type ProductTerms, productTerms } from "./normalize/terms.ts";
-export { descriptionSimilarity } from "./normalize/text.ts";
+export { descriptionSimilarity, merchantKey } from "./normalize/text.ts";
 export {
   type Activity,
   type ActivityFlag,

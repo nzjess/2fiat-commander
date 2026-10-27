@@ -5,6 +5,7 @@ import { activityRoutes } from "./api/activities.ts";
 import { adjustmentRoutes } from "./api/adjustments.ts";
 import { authRoutes } from "./api/auth.ts";
 import { cardRoutes } from "./api/cards.ts";
+import { categoryRoutes } from "./api/categories.ts";
 import { type AppDeps, handleError, loadAccount, requireUser } from "./api/common.ts";
 import { feeScheduleRoutes } from "./api/feeSchedules.ts";
 import { findingRoutes } from "./api/findings.ts";
@@ -26,6 +27,8 @@ export function createApp(deps: AppDeps) {
       .get("/health", (c) => c.json({ ok: true }))
       .route("/auth", authRoutes(deps))
       .route("/fx", fxRoutes(deps))
+      .use("/categories/*", requireUser(deps))
+      .route("/categories", categoryRoutes(deps))
       .use("/accounts/*", requireUser(deps))
       .route("/accounts", accountRoutes(deps))
       .use("/accounts/:accountId/*", loadAccount(deps))

@@ -23,6 +23,7 @@ import type { Card, LogicalCard } from "../../../../api.ts";
 import { ActivityDrawer } from "../../../../components/ActivityDrawer.tsx";
 import { ActivityTable } from "../../../../components/ActivityTable.tsx";
 import { CardPageHeader } from "../../../../components/CardPageHeader.tsx";
+import { useCategoryColor } from "../../../../components/Categories.tsx";
 import { ErrorView } from "../../../../components/status.tsx";
 import { groupColor, kindsByGroup } from "../../../../lib/cashflow.ts";
 import {
@@ -40,7 +41,13 @@ import {
   type PageSize,
   parseActivitySearch,
 } from "../../../../lib/search.ts";
-import { activitiesQuery, cardsQuery, findingsQuery, logicalCardsQuery } from "../../../../queries.ts";
+import {
+  activitiesQuery,
+  cardsQuery,
+  categoriesQuery,
+  findingsQuery,
+  logicalCardsQuery,
+} from "../../../../queries.ts";
 
 declare module "@tanstack/react-router" {
   interface HistoryState {
@@ -222,11 +229,15 @@ function Filters({
           onChange={(values) => update({ status: join(values) })}
           clearable
         />
+        <CategoryFilter
+          value={split(search.category)}
+          onChange={(values) => update({ category: join(values) })}
+        />
         <TextInput
           size="xs"
           w={240}
           label="Search"
-          placeholder="Description"
+          placeholder="Description or note"
           value={text}
           onChange={(e) => {
             setText(e.currentTarget.value);
@@ -274,6 +285,49 @@ function Filters({
         />
       )}
     </Stack>
+  );
+}
+
+/** Narrows to some categories, or to spending with none yet. */
+function CategoryFilter({ value, onChange }: { value: string[]; onChange: (values: string[]) => void }) {
+  const { data: categories = [] } = useQuery(categoriesQuery);
+  const hex = useCategoryColor();
+  const colorOf = new Map(categories.map((c) => [String(c.id), hex(c.color)]));
+  const swatch = (v: string) =>
+    v === "none" ? undefined : (
+      <ColorSwatch color={colorOf.get(v) ?? "transparent"} size={8} withShadow={false} />
+    );
+  return (
+    <MultiSelect
+      size="xs"
+      w={200}
+      label="Category"
+      placeholder={value.length ? undefined : "All categories"}
+      data={[
+        { value: "none", label: "Uncategorised" },
+        ...categories.map((c) => ({ value: String(c.id), label: c.name })),
+      ]}
+      value={value}
+      onChange={onChange}
+      renderOption={({ option, checked }) => (
+        <Group gap={8} wrap="nowrap" style={{ flex: 1 }}>
+          {swatch(option.value)}
+          <Text size="xs" style={{ flex: 1 }} fs={option.value === "none" ? "italic" : undefined}>
+            {option.label}
+          </Text>
+          {checked && <CheckIcon size={10} />}
+        </Group>
+      )}
+      renderPill={({ option, onRemove, disabled }) => (
+        <Pill withRemoveButton onRemove={onRemove} disabled={disabled}>
+          <Group gap={6} wrap="nowrap" component="span">
+            {option && swatch(String(option.value))}
+            {option?.label}
+          </Group>
+        </Pill>
+      )}
+      clearable
+    />
   );
 }
 

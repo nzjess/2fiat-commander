@@ -29,7 +29,8 @@ function annotate(
   const categoryId =
     category === null
       ? null
-      : s.db.insert(categories).values({ userId: s.userId, name: category }).returning().get().id;
+      : s.db.insert(categories).values({ userId: s.userId, name: category, color: "blue" }).returning().get()
+          .id;
   s.db.insert(activityAnnotations).values({ activityId, categoryId, note }).run();
 }
 

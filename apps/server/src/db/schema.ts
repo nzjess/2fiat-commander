@@ -22,6 +22,7 @@ import {
   unique,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import type { CategoryColor } from "../categories.ts";
 
 // Conventions: our own integer primary keys everywhere, 2fiat's ids in `twofiat_id` columns (unique per account).
 // Times are ISO-8601 UTC text from `toISOString()` (raw rows' `created_at` too), so they sort and compare as
@@ -347,7 +348,8 @@ export const categories = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     name: text().notNull(),
-    color: text(),
+    /** A key into the web app's category palette (`CATEGORY_COLORS`), not a colour value. */
+    color: text().$type<CategoryColor>().notNull(),
     createdAt: createdAt(),
   },
   (t) => [unique("categories_user_name").on(t.userId, t.name)],
@@ -360,7 +362,9 @@ export const activityAnnotations = sqliteTable(
     activityId: integer("activity_id")
       .primaryKey()
       .references(() => activities.id, { onDelete: "cascade" }),
+    /** Only on kinds that are spending (`CATEGORY_KINDS`); the API enforces it. */
     categoryId: integer("category_id").references(() => categories.id, { onDelete: "set null" }),
+    /** No length CHECK: merging two activities joins their notes. The API limits what the user enters. */
     note: text(),
     updatedAt: text("updated_at")
       .notNull()

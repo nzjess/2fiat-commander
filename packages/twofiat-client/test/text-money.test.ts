@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { descriptionSimilarity, parseCents } from "../src/index.ts";
+import { descriptionSimilarity, merchantKey, parseCents } from "../src/index.ts";
 
 describe("parseCents", () => {
   test.each([
@@ -30,5 +30,19 @@ describe("descriptionSimilarity", () => {
     ["CAFE CORNER", "FUELSTOP SPRINGFIELD USA", 0],
   ])("%s ~ %s", (posted, authorized, expected) => {
     expect(descriptionSimilarity(posted, authorized)).toBeCloseTo(expected, 2);
+  });
+});
+
+describe("merchantKey", () => {
+  test.each([
+    ["SP SOME SHOP SPRINGFIELD USA", "sp some shop springfield"],
+    ["BIGSTORE* QX7R20LM4", "bigstore"],
+    ["RIDEAPP   *TRIP", "rideapp trip"],
+    ["BIGSTORE.CO.EX SPRINGFIELD USA", "bigstore co ex springfield"],
+    ["GROCER STORES 4821 SPRINGFIELD USA", "grocer stores springfield"],
+    ["GBR", "gbr"],
+    ["12345", ""],
+  ])("%s → %s", (description, key) => {
+    expect(merchantKey(description)).toBe(key);
   });
 });

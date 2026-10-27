@@ -24,6 +24,7 @@ import {
 } from "../lib/format.ts";
 import { activityQuery, findingsQuery } from "../queries.ts";
 import { ActivityAmount, ActivityStatusBadge, isOwnTransfer, KindTag } from "./ActivityTable.tsx";
+import { ActivityAnnotation } from "./Categories.tsx";
 import { AnchorLink } from "./links.tsx";
 import { useMoney } from "./Money.tsx";
 import { ErrorView } from "./status.tsx";
@@ -100,6 +101,8 @@ function Details({
           ))}
         </Group>
       </Stack>
+
+      <ActivityAnnotation accountId={accountId} activity={a} />
 
       <Table variant="vertical" layout="fixed" withTableBorder>
         <Table.Tbody>

@@ -84,3 +84,5 @@ export type FeeSchedule = Body<AccountApi["fee-schedules"]["$get"]>[number];
 export type FeeSuggestion = Body<AccountApi["fee-schedules"]["suggestion"]["$get"]>;
 export type CardFees = Body<AccountApi["logical-cards"][":logicalCardId"]["fees"]["$get"]>["cards"][number];
 export type ActivityDetail = Body<AccountApi["activities"][":activityId"]["$get"]>;
+export type Category = Body<typeof api.categories.$get>[number];
+export type CategoryColor = Category["color"];

@@ -1,13 +1,24 @@
 import { zValidator } from "@hono/zod-validator";
 import { LOOKBACK_DAYS } from "@twofiat/client";
-import { and, desc, eq, gte, inArray, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import {
+  annotate,
+  CATEGORY_KINDS,
+  categorize,
+  NOTE_MAX,
+  sameMerchant,
+  takesCategory,
+} from "../categories.ts";
+import { chunks } from "../db/db.ts";
+import {
   activities,
+  activityAnnotations,
   activitySources,
   adjustments,
   cards,
+  categories,
   findings,
   rawOrders,
   rawTransactions,
@@ -16,11 +27,12 @@ import { daysBefore } from "../time.ts";
 import { type AccountEnv, ApiError, type AppDeps, idParam, invalid, notFound } from "./common.ts";
 
 type ActivityRow = typeof activities.$inferSelect;
+type Annotation = Pick<typeof activityAnnotations.$inferSelect, "categoryId" | "note">;
 
 /** Kinds whose pending authorisation should post within days; older ones are stale, as reconcile reports them. */
 const STALE_KINDS = ["purchase", "refund"] as const;
 
-function activityDto(a: ActivityRow, staleBefore: string) {
+function activityDto(a: ActivityRow, annotation: Annotation | null, staleBefore: string) {
   return {
     id: a.id,
     cardId: a.cardId,
@@ -44,6 +56,10 @@ function activityDto(a: ActivityRow, staleBefore: string) {
       a.status === "pending" &&
       (STALE_KINDS as readonly string[]).includes(a.kind) &&
       a.occurredAt < staleBefore,
+    /** Whether it's spending, which can take a category. */
+    categorizable: takesCategory(a.kind),
+    categoryId: annotation?.categoryId ?? null,
+    note: annotation?.note ?? null,
   };
 }
 
@@ -81,7 +97,23 @@ const ListQuery = z.object({
   /** occurred_at from this time (inclusive) up to `to` (exclusive). */
   from: z.iso.datetime().optional(),
   to: z.iso.datetime().optional(),
-  /** Matches the description or the posted one. */
+  /** Comma-separated category ids, and `none` for uncategorised spending. */
+  category: z
+    .string()
+    .transform(list)
+    .pipe(
+      z.array(
+        z.union([
+          z.literal("none"),
+          z
+            .string()
+            .regex(/^[1-9]\d*$/)
+            .transform(Number),
+        ]),
+      ),
+    )
+    .optional(),
+  /** Matches the description, the posted one, or the note. */
   q: z.string().trim().min(1).max(200).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(50),
@@ -91,6 +123,33 @@ const ListQuery = z.object({
 export function activityRoutes(deps: AppDeps) {
   const { db } = deps;
   const now = deps.now ?? (() => new Date());
+
+  const findActivity = (id: number, accountId: number) => {
+    const activity = db
+      .select()
+      .from(activities)
+      .where(and(eq(activities.id, id), eq(activities.accountId, accountId)))
+      .get();
+    if (!activity) throw notFound("activity");
+    return activity;
+  };
+  const annotationOf = (activityId: number): Annotation | null =>
+    db
+      .select({ categoryId: activityAnnotations.categoryId, note: activityAnnotations.note })
+      .from(activityAnnotations)
+      .where(eq(activityAnnotations.activityId, activityId))
+      .get() ?? null;
+  /** A category of the user's; anyone else's is a 400, as it's in the body. */
+  const assertCategory = (categoryId: number, userId: number) => {
+    const found = db
+      .select({ id: categories.id })
+      .from(categories)
+      .where(and(eq(categories.id, categoryId), eq(categories.userId, userId)))
+      .get();
+    if (!found) throw new ApiError(400, "invalid_request", "categoryId: no such category");
+  };
+  const notSpending = (a: ActivityRow) =>
+    new ApiError(400, "invalid_request", `a ${a.kind} can't take a category, only spending can`);
 
   return (
     new Hono<AccountEnv>()
@@ -107,8 +166,12 @@ export function activityRoutes(deps: AppDeps) {
         const pattern = query.q && `%${query.q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
 
         const rows = db
-          .select()
+          .select({
+            activity: activities,
+            annotation: { categoryId: activityAnnotations.categoryId, note: activityAnnotations.note },
+          })
           .from(activities)
+          .leftJoin(activityAnnotations, eq(activityAnnotations.activityId, activities.id))
           .where(
             and(
               eq(activities.accountId, c.var.account.id),
@@ -141,12 +204,25 @@ export function activityRoutes(deps: AppDeps) {
                     ),
                   )
                 : undefined,
+              query.category?.length
+                ? or(
+                    ...query.category.map((category) =>
+                      category === "none"
+                        ? and(
+                            inArray(activities.kind, [...CATEGORY_KINDS]),
+                            isNull(activityAnnotations.categoryId),
+                          )
+                        : eq(activityAnnotations.categoryId, category),
+                    ),
+                  )
+                : undefined,
               query.from === undefined ? undefined : gte(activities.occurredAt, query.from),
               query.to === undefined ? undefined : lt(activities.occurredAt, query.to),
               pattern
                 ? or(
                     sql`${activities.description} LIKE ${pattern} ESCAPE '\\'`,
                     sql`${activities.postedDescription} LIKE ${pattern} ESCAPE '\\'`,
+                    sql`${activityAnnotations.note} LIKE ${pattern} ESCAPE '\\'`,
                   )
                 : undefined,
               cursor === undefined
@@ -164,19 +240,73 @@ export function activityRoutes(deps: AppDeps) {
         const page = rows.slice(0, query.limit);
         const last = page.at(-1);
         return c.json({
-          items: page.map((a) => activityDto(a, staleBefore)),
-          nextCursor: rows.length > query.limit && last ? encodeCursor(last) : null,
+          items: page.map((r) => activityDto(r.activity, r.annotation, staleBefore)),
+          nextCursor: rows.length > query.limit && last ? encodeCursor(last.activity) : null,
         });
       })
+      // Sets what's given of an activity's category and note; null clears one. Any activity takes a note.
+      .patch(
+        "/activities/:activityId/annotation",
+        zValidator(
+          "json",
+          z.object({
+            categoryId: z.number().int().positive().nullable().optional(),
+            note: z.string().max(NOTE_MAX).nullable().optional(),
+          }),
+          invalid,
+        ),
+        (c) => {
+          const changes = c.req.valid("json");
+          const activity = findActivity(idParam(c, "activityId", "activity"), c.var.account.id);
+          if (changes.categoryId != null) {
+            if (!takesCategory(activity.kind)) throw notSpending(activity);
+            assertCategory(changes.categoryId, c.var.user.id);
+          }
+          annotate(db, activity.id, changes);
+          return c.json(
+            activityDto(activity, annotationOf(activity.id), daysBefore(now().toISOString(), LOOKBACK_DAYS)),
+          );
+        },
+      )
+      // The account's uncategorised spending from the same merchant as this activity: for setting its category on them too.
+      .get("/activities/:activityId/same-merchant", (c) => {
+        const activity = findActivity(idParam(c, "activityId", "activity"), c.var.account.id);
+        return c.json({ activityIds: sameMerchant(db, c.var.account.id, activity.description, activity.id) });
+      })
+      // Sets one category on many activities, keeping their notes.
+      .post(
+        "/activities/categorize",
+        zValidator(
+          "json",
+          z.object({
+            activityIds: z.array(z.number().int().positive()).min(1).max(5000),
+            categoryId: z.number().int().positive(),
+          }),
+          invalid,
+        ),
+        (c) => {
+          const { activityIds, categoryId } = c.req.valid("json");
+          assertCategory(categoryId, c.var.user.id);
+          const ids = [...new Set(activityIds)];
+          const found = [...chunks(ids)].flatMap((chunk) =>
+            db
+              .select()
+              .from(activities)
+              .where(and(eq(activities.accountId, c.var.account.id), inArray(activities.id, chunk)))
+              .all(),
+          );
+          if (found.length < ids.length)
+            throw new ApiError(400, "invalid_request", "activityIds: no such activity");
+          const other = found.find((a) => !takesCategory(a.kind));
+          if (other) throw notSpending(other);
+          categorize(db, ids, categoryId);
+          return c.json({ count: ids.length });
+        },
+      )
       // One activity, with 2fiat's original rows (or the user's adjustment) behind it and the findings that point at it.
       .get("/activities/:activityId", (c) => {
         const id = idParam(c, "activityId", "activity");
-        const activity = db
-          .select()
-          .from(activities)
-          .where(and(eq(activities.id, id), eq(activities.accountId, c.var.account.id)))
-          .get();
-        if (!activity) throw notFound("activity");
+        const activity = findActivity(id, c.var.account.id);
 
         const transactions = db
           .select({
@@ -233,7 +363,7 @@ export function activityRoutes(deps: AppDeps) {
           .map((f) => f.id);
 
         return c.json({
-          ...activityDto(activity, daysBefore(now().toISOString(), LOOKBACK_DAYS)),
+          ...activityDto(activity, annotationOf(id), daysBefore(now().toISOString(), LOOKBACK_DAYS)),
           sources: { transactions, orders, adjustment },
           findingIds,
         });

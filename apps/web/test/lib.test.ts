@@ -180,6 +180,10 @@ describe("search params", () => {
     expect(parseActivitySearch({ cursor: "WyIyMDI2IiwxXQ" })).toEqual({});
     expect(parseActivitySearch({ page: 1, cursor: "WyIyMDI2IiwxXQ" })).toEqual({});
     expect(parseActivitySearch({ page: 2, cursor: "not a cursor!" })).toEqual({});
+    // Category ids and "none", deduplicated; a lone id may arrive as a number.
+    expect(parseActivitySearch({ category: "3,none,x,0,3" })).toEqual({ category: "3,none" });
+    expect(parseActivitySearch({ category: 7 })).toEqual({ category: "7" });
+    expect(parseActivitySearch({ category: "x" })).toEqual({});
   });
 
   test("offers date range quick picks up to today, as local dates", () => {
@@ -202,6 +206,7 @@ describe("search params", () => {
   test("turns activity filters into the server's query, with an exclusive end", () => {
     // The default page size is sent too: the server's own differs.
     expect(activitiesParams(5, {})).toEqual({ logicalCardId: "5", limit: "10" });
+    expect(activitiesParams(5, { category: "3,none" })).toMatchObject({ category: "3,none" });
     expect(
       activitiesParams(5, {
         kind: "fee",

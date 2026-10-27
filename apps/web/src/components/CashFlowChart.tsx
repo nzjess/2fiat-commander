@@ -31,7 +31,7 @@ import { useMoney } from "./Money.tsx";
 const ALL_GROUPS = FLOW_GROUPS.map((g) => g.key);
 const DAY = 86_400_000;
 
-function periodLabel(t: number, bucket: Bucket): string {
+export function periodLabel(t: number, bucket: Bucket): string {
   const d = new Date(t);
   if (bucket === "month") return d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
   const day = d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
