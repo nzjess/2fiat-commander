@@ -104,17 +104,22 @@ export function ActivityTable({
   const byId = new Map(cards.map((c) => [c.id, c]));
   const several = logical.cardIds.length > 1;
   return (
-    <Table.ScrollContainer minWidth={720}>
-      <Table highlightOnHover verticalSpacing={6}>
+    <Table.ScrollContainer minWidth={960}>
+      {/* Fixed widths, so the columns don't move with what a page holds; the description takes the rest. */}
+      <Table highlightOnHover verticalSpacing={6} layout="fixed">
         <Table.Thead>
           <Table.Tr>
-            <Table.Th>When</Table.Th>
+            <Table.Th w={170}>When</Table.Th>
             <Table.Th>Description</Table.Th>
-            <Table.Th>Kind</Table.Th>
-            <Table.Th>Status</Table.Th>
-            <Table.Th ta="right">Amount</Table.Th>
-            <Table.Th ta="right">Fee</Table.Th>
-            {several && <Table.Th>Card</Table.Th>}
+            <Table.Th w={230}>Kind</Table.Th>
+            <Table.Th w={100}>Status</Table.Th>
+            <Table.Th w={130} ta="right">
+              Amount
+            </Table.Th>
+            <Table.Th w={90} ta="right">
+              Fee
+            </Table.Th>
+            {several && <Table.Th w={80}>Card</Table.Th>}
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>

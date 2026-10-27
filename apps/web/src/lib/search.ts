@@ -66,6 +66,9 @@ export interface ActivitySearch {
   finding?: number;
   /** Rows a page; absent means `DEFAULT_PAGE_SIZE`. */
   size?: PageSize;
+  /** Which page, from 2 (absent means the first), and the server's cursor it starts at: both or neither. */
+  page?: number;
+  cursor?: string;
   /** The activity whose details are open. */
   activity?: number;
 }
@@ -84,6 +87,9 @@ export function parseActivitySearch(raw: Record<string, unknown>): ActivitySearc
   // The router parses a numeric search like "1234" as a number.
   const text = typeof raw.q === "number" ? String(raw.q) : raw.q;
   const q = typeof text === "string" ? text.trim().slice(0, 200) : "";
+  const page = positiveInt(raw.page);
+  const cursor = typeof raw.cursor === "string" && /^[\w-]{1,200}$/.test(raw.cursor) ? raw.cursor : undefined;
+  const paged = page !== undefined && page > 1 && cursor !== undefined;
   const fields: ActivitySearch = {
     card: positiveInt(raw.card),
     kind: knownList(raw.kind, Object.keys(ACTIVITY_KIND_LABELS)),
@@ -95,6 +101,8 @@ export function parseActivitySearch(raw: Record<string, unknown>): ActivitySearc
     hideFees: raw.hideFees === true || raw.hideFees === "true" ? true : undefined,
     finding: positiveInt(raw.finding),
     size: PAGE_SIZES.find((n) => n === positiveInt(raw.size) && n !== DEFAULT_PAGE_SIZE),
+    page: paged ? page : undefined,
+    cursor: paged ? cursor : undefined,
     activity: positiveInt(raw.activity),
   };
   return Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));

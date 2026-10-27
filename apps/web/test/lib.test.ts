@@ -164,6 +164,15 @@ describe("search params", () => {
     expect(parseActivitySearch({ size: "20" })).toEqual({ size: 20 });
     expect(parseActivitySearch({ size: 10 })).toEqual({});
     expect(parseActivitySearch({ size: 30 })).toEqual({});
+    // A page from 2 with its cursor, both or neither.
+    expect(parseActivitySearch({ page: "3", cursor: "WyIyMDI2IiwxXQ" })).toEqual({
+      page: 3,
+      cursor: "WyIyMDI2IiwxXQ",
+    });
+    expect(parseActivitySearch({ page: 3 })).toEqual({});
+    expect(parseActivitySearch({ cursor: "WyIyMDI2IiwxXQ" })).toEqual({});
+    expect(parseActivitySearch({ page: 1, cursor: "WyIyMDI2IiwxXQ" })).toEqual({});
+    expect(parseActivitySearch({ page: 2, cursor: "not a cursor!" })).toEqual({});
   });
 
   test("turns activity filters into the server's query, with an exclusive end", () => {
