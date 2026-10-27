@@ -1,13 +1,8 @@
 import { Badge, ColorSwatch, Group, Table, Text, Tooltip } from "@mantine/core";
 import type { Activity, ActivityKind, Card, LogicalCard } from "../api.ts";
-import {
-  ACTIVITY_KIND_LABELS,
-  ACTIVITY_STATUS_LABELS,
-  formatDateTime,
-  formatMoney,
-  lastFour,
-} from "../lib/format.ts";
+import { ACTIVITY_KIND_LABELS, ACTIVITY_STATUS_LABELS, formatDateTime, lastFour } from "../lib/format.ts";
 import { groupColor } from "../lib/spending.ts";
+import { Amount } from "./Money.tsx";
 
 /**
  * An activity's kind, drawn like the spending chart's toggles: its group's colour dot, then the kind. So the same
@@ -66,14 +61,14 @@ export function ActivityAmount({
   activity,
   size = "sm",
 }: {
-  activity: Pick<Activity, "amountCents" | "attemptedAmountCents">;
+  activity: Pick<Activity, "amountCents" | "attemptedAmountCents" | "occurredAt">;
   size?: string;
 }) {
-  const { amountCents, attemptedAmountCents } = activity;
+  const { amountCents, attemptedAmountCents, occurredAt } = activity;
   if (amountCents === 0 && attemptedAmountCents !== null) {
     return (
       <Text size={size} c="dimmed" td="line-through" style={{ whiteSpace: "nowrap" }}>
-        {formatMoney(attemptedAmountCents, { signed: true })}
+        <Amount cents={attemptedAmountCents} at={occurredAt} signed />
       </Text>
     );
   }
@@ -84,7 +79,7 @@ export function ActivityAmount({
       c={amountCents > 0 ? "teal.7" : amountCents < 0 ? "red.7" : "dimmed"}
       style={{ whiteSpace: "nowrap" }}
     >
-      {formatMoney(amountCents, { signed: true })}
+      <Amount cents={amountCents} at={occurredAt} signed />
     </Text>
   );
 }
@@ -162,7 +157,7 @@ export function ActivityTable({
                 <Table.Td ta="right">
                   {a.feeCents !== null && a.feeCents !== 0 && (
                     <Text size="sm" c="dimmed" style={{ whiteSpace: "nowrap" }}>
-                      {formatMoney(a.feeCents)}
+                      <Amount cents={a.feeCents} at={a.occurredAt} />
                     </Text>
                   )}
                 </Table.Td>

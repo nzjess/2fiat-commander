@@ -25,6 +25,7 @@ import {
 import { activityQuery, findingsQuery } from "../queries.ts";
 import { ActivityAmount, ActivityStatusBadge, isOwnTransfer, KindTag } from "./ActivityTable.tsx";
 import { AnchorLink } from "./links.tsx";
+import { useMoney } from "./Money.tsx";
 import { ErrorView } from "./status.tsx";
 
 /** One activity in full: every field and flag, 2fiat's rows (or the user's adjustment) behind it, its findings. */
@@ -62,6 +63,7 @@ function Details({
   logical: LogicalCard;
 }) {
   const { data: a, error } = useQuery(activityQuery(accountId, activityId));
+  const display = useMoney();
   if (error) return <ErrorView error={error} />;
   if (!a) return <Loader size="sm" />;
 
@@ -69,6 +71,8 @@ function Details({
   const card = byId.get(a.cardId);
   const counterpart = a.counterpartCardId === null ? undefined : byId.get(a.counterpartCardId);
   const money = (cents: number | null) => cents !== null && formatMoney(cents, { signed: true });
+  // The amount in the display currency, and how it was converted; the fields below stay in 2fiat's dollars.
+  const converted = display.convert(a.amountCents, a.occurredAt);
 
   return (
     <Stack gap="lg">
@@ -103,6 +107,15 @@ function Details({
           <Field label="Posted">{a.settledAt && formatDateTime(a.settledAt)}</Field>
           <Field label="Card">{card && cardLabel(card)}</Field>
           <Field label="Amount">{money(a.amountCents)}</Field>
+          {display.converts && a.amountCents !== 0 && (
+            <Field label={`In ${display.currency}`}>
+              {display.format(converted.cents, { signed: true })}
+              <Text span size="xs" c="dimmed">
+                {" "}
+                ({display.describe(converted, { signed: true })})
+              </Text>
+            </Field>
+          )}
           <Field label="Authorised">
             {a.authorizedAmountCents !== a.amountCents && money(a.authorizedAmountCents)}
           </Field>

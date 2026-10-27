@@ -22,6 +22,7 @@ import { CardFace } from "../../../../../components/CardFace.tsx";
 import { CardSelect } from "../../../../../components/CardPageHeader.tsx";
 import { FindingList } from "../../../../../components/FindingList.tsx";
 import { AnchorLink } from "../../../../../components/links.tsx";
+import { Amount } from "../../../../../components/Money.tsx";
 import { SpendingChart } from "../../../../../components/SpendingChart.tsx";
 import { GapBadge, MissingBadge, OpeningBadge, TransientBadge } from "../../../../../components/status.tsx";
 import {
@@ -404,7 +405,9 @@ function PhysicalCards({
                 </Text>
               </Stack>
               <Group gap="xs">
-                <Text size="sm">{formatMoney(card.reported.cents)}</Text>
+                <Text size="sm">
+                  <Amount cents={card.reported.cents} at={null} />
+                </Text>
                 {card.balance && <GapBadge cents={card.balance.gapCents} />}
               </Group>
             </Group>

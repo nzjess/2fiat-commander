@@ -197,6 +197,13 @@ CREATE TABLE `findings` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `findings_card_fingerprint` ON `findings` (`card_id`,`fingerprint`);--> statement-breakpoint
+CREATE TABLE `fx_rates` (
+	`currency` text NOT NULL,
+	`day` text NOT NULL,
+	`per_eur` real NOT NULL,
+	PRIMARY KEY(`currency`, `day`)
+);
+--> statement-breakpoint
 CREATE TABLE `logical_cards` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`account_id` integer NOT NULL,
@@ -282,6 +289,7 @@ CREATE TABLE `users` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`username` text NOT NULL,
 	`password_hash` text NOT NULL,
+	`display_currency` text DEFAULT 'USD' NOT NULL,
 	`created_at` text NOT NULL
 );
 --> statement-breakpoint

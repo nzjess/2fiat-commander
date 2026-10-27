@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ac8dba17-c6e4-451d-983d-f5dc59032b4b",
+  "id": "81e0d45d-a401-4bba-8c77-c6b3c1b2c016",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "accounts": {
@@ -1302,6 +1302,42 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "fx_rates": {
+      "name": "fx_rates",
+      "columns": {
+        "currency": {
+          "name": "currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "day": {
+          "name": "day",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "per_eur": {
+          "name": "per_eur",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "fx_rates_currency_day_pk": {
+          "columns": ["currency", "day"],
+          "name": "fx_rates_currency_day_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "logical_cards": {
       "name": "logical_cards",
       "columns": {
@@ -1841,6 +1877,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "display_currency": {
+          "name": "display_currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'USD'"
         },
         "created_at": {
           "name": "created_at",

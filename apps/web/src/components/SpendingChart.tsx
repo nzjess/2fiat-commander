@@ -10,9 +10,9 @@ import {
   useMantineTheme,
 } from "@mantine/core";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { RANGES, type Range, rangeStart } from "../lib/balance.ts";
-import { formatMoney } from "../lib/format.ts";
+import type { Money } from "../lib/fx.ts";
 import {
   BUCKETS,
   type Bucket,
@@ -26,6 +26,7 @@ import {
   totals,
 } from "../lib/spending.ts";
 import { spendingQuery } from "../queries.ts";
+import { useMoney } from "./Money.tsx";
 
 const ALL_GROUPS = FLOW_GROUPS.map((g) => g.key);
 const DAY = 86_400_000;
@@ -47,6 +48,12 @@ export function SpendingChart({ accountId, logicalCardId }: { accountId: string;
   const [range, setRange] = useState<Range>("90d");
   const [bucket, setBucket] = useState<Bucket>(defaultBucket(90));
   const [shown, setShown] = useState<GroupKey[]>(ALL_GROUPS);
+  const money = useMoney();
+  // Each activity in the display currency at its own day's rate, before anything is summed.
+  const flows = useMemo(
+    () => data.activities.map((f) => ({ ...f, amountCents: money.convert(f.amountCents, f.at).cents })),
+    [data, money],
+  );
 
   if (data.activities.length === 0) {
     return (
@@ -57,8 +64,8 @@ export function SpendingChart({ accountId, logicalCardId }: { accountId: string;
   }
   const now = Date.now();
   const from = rangeStart(range, now);
-  const present = presentGroups(data.activities);
-  const rows = spendingRows(data.activities, bucket, new Set(shown), from, now);
+  const present = presentGroups(flows);
+  const rows = spendingRows(flows, bucket, new Set(shown), from, now);
   const sum = totals(rows);
   // Only the series with something in them, so empty ones don't take up room.
   const series = FLOW_GROUPS.flatMap((g) =>
@@ -113,14 +120,19 @@ export function SpendingChart({ accountId, logicalCardId }: { accountId: string;
       </Chip.Group>
       <Group gap="lg">
         <Text size="sm">
-          In <b>{formatMoney(sum.inCents)}</b>
+          In <b>{money.format(sum.inCents)}</b>
         </Text>
         <Text size="sm">
-          Out <b>{formatMoney(-sum.outCents)}</b>
+          Out <b>{money.format(-sum.outCents)}</b>
         </Text>
         <Text size="sm">
-          Net <b>{formatMoney(sum.netCents, { signed: true })}</b>
+          Net <b>{money.format(sum.netCents, { signed: true })}</b>
         </Text>
+        {money.converts && (
+          <Text size="xs" c="dimmed">
+            Converted from USD at each day's rate, so approximate
+          </Text>
+        )}
       </Group>
       <BarChart
         h={280}
@@ -142,11 +154,11 @@ export function SpendingChart({ accountId, logicalCardId }: { accountId: string;
               }
             : { minTickGap: 16, tickFormatter: (t: number) => periodLabel(t, bucket) }
         }
-        valueFormatter={(cents) => formatMoney(cents)}
+        valueFormatter={(cents) => money.format(cents)}
         tooltipProps={{
           content: ({ active, payload }) => {
             const row = payload?.[0]?.payload as SpendingRow | undefined;
-            return active && row ? <Tip row={row} bucket={bucket} /> : null;
+            return active && row ? <Tip row={row} bucket={bucket} money={money} /> : null;
           },
         }}
       />
@@ -187,7 +199,7 @@ function TimeBar(props: unknown) {
   );
 }
 
-function Tip({ row, bucket }: { row: SpendingRow; bucket: Bucket }) {
+function Tip({ row, bucket, money }: { row: SpendingRow; bucket: Bucket; money: Money }) {
   const when =
     bucket === "none"
       ? new Date(row.t).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
@@ -207,7 +219,7 @@ function Tip({ row, bucket }: { row: SpendingRow; bucket: Bucket }) {
         <>
           <Text size="sm">{row.label}</Text>
           <Text size="sm" fw={600}>
-            {formatMoney(row.inCents + row.outCents, { signed: true })}
+            {money.format(row.inCents + row.outCents, { signed: true })}
           </Text>
         </>
       ) : (
@@ -215,12 +227,12 @@ function Tip({ row, bucket }: { row: SpendingRow; bucket: Bucket }) {
           {parts.map((p) => (
             <Group key={`${p.label}${p.cents > 0}`} justify="space-between" gap="md">
               <Text size="xs">{p.label}</Text>
-              <Text size="xs">{formatMoney(p.cents, { signed: true })}</Text>
+              <Text size="xs">{money.format(p.cents, { signed: true })}</Text>
             </Group>
           ))}
           <Text size="xs" fw={600} mt={4}>
             {row.count} {row.count === 1 ? "activity" : "activities"}, net{" "}
-            {formatMoney(row.inCents + row.outCents, { signed: true })}
+            {money.format(row.inCents + row.outCents, { signed: true })}
           </Text>
         </>
       )}

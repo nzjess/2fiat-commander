@@ -1,7 +1,8 @@
 import { Box, Group, Stack, Text } from "@mantine/core";
 import type { Card } from "../api.ts";
-import { formatMoney, isActive } from "../lib/format.ts";
+import { isActive } from "../lib/format.ts";
 import { CardChip } from "./CardChip.tsx";
+import { Amount } from "./Money.tsx";
 
 /** The network from a card number's first digit: 4 is Visa, 2 and 5 are Mastercard. */
 export function cardNetwork(maskedNumber: string): "visa" | "mastercard" | undefined {
@@ -88,7 +89,7 @@ export function CardFace({
         </Stack>
         {balanceCents != null && (
           <Text fw={700} fz="lg" lh={1.2}>
-            {formatMoney(balanceCents)}
+            <Amount cents={balanceCents} at={null} />
           </Text>
         )}
       </Group>

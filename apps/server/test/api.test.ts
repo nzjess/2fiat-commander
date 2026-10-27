@@ -15,7 +15,7 @@ import { describe, expect, test } from "vitest";
 import { type App, createApp } from "../src/app.ts";
 import { createUser, hashPassword } from "../src/auth.ts";
 import { openDb } from "../src/db/db.ts";
-import { accounts, cards as cardsTable, sessions, syncs } from "../src/db/schema.ts";
+import { accounts, cards as cardsTable, fxRates, sessions, syncs } from "../src/db/schema.ts";
 import { markForRebuild } from "../src/ledger.ts";
 import { reevaluate } from "../src/reevaluate.ts";
 import { Secrets } from "../src/secrets.ts";
@@ -112,7 +112,7 @@ describe("auth", () => {
     expect((await c.api.accounts.$get()).status).toBe(401);
 
     const res = await c.api.auth.login.$post({ json: { username: "jesse", password: PASSWORD } });
-    expect(await res.json()).toEqual({ user: { id: s.userId, username: "jesse" } });
+    expect(await res.json()).toEqual({ user: { id: s.userId, username: "jesse", displayCurrency: "USD" } });
     const cookie = res.headers.get("set-cookie") ?? "";
     expect(cookie).toMatch(/^session=[\w-]{43};/);
     expect(cookie).toMatch(/HttpOnly/);
@@ -122,7 +122,9 @@ describe("auth", () => {
     // Only the token's hash is stored.
     expect(s.db.select().from(sessions).get()?.id).not.toBe(c.jar.get("session"));
 
-    expect(await ok(c.api.auth.me.$get())).toEqual({ user: { id: s.userId, username: "jesse" } });
+    expect(await ok(c.api.auth.me.$get())).toEqual({
+      user: { id: s.userId, username: "jesse", displayCurrency: "USD" },
+    });
     expect((await c.api.auth.logout.$post()).status).toBe(204);
     expect(c.jar.has("session")).toBe(false);
     expect(s.db.select().from(sessions).all()).toEqual([]);
@@ -175,6 +177,42 @@ describe("auth", () => {
       body: "username=jesse&password=x",
     });
     expect(res.status).toBe(403);
+  });
+});
+
+describe("display currency", () => {
+  test("is USD by default, set from the whitelist only, and kept on the user", async () => {
+    const s = await setup();
+    const c = await loggedIn(s);
+    expect((await ok(c.api.fx.$get())).currency).toBe("USD");
+
+    const bad = await c.api.auth.me.$patch({ json: { displayCurrency: "SEK" as "GBP" } });
+    expect(bad.status).toBe(400);
+    expect(await ok(c.api.auth.me.$patch({ json: { displayCurrency: "GBP" } }))).toEqual({
+      user: { id: s.userId, username: "jesse", displayCurrency: "GBP" },
+    });
+    expect((await ok(c.api.auth.me.$get())).user.displayCurrency).toBe("GBP");
+    expect((await client(s.app).api.auth.me.$patch({ json: { displayCurrency: "EUR" } })).status).toBe(401);
+  });
+
+  test("serves the whitelist and the user's USD rates", async () => {
+    const s = await setup();
+    s.db
+      .insert(fxRates)
+      .values([
+        { currency: "USD", day: "2026-10-23", perEur: 1.25 },
+        { currency: "NZD", day: "2026-10-23", perEur: 2 },
+      ])
+      .run();
+    const c = await loggedIn(s);
+    await c.api.auth.me.$patch({ json: { displayCurrency: "NZD" } });
+    expect(await ok(c.api.fx.$get())).toEqual({
+      currencies: ["USD", "GBP", "EUR", "NZD", "AUD", "CAD", "CHF", "HKD", "JPY"],
+      currency: "NZD",
+      rates: [{ day: "2026-10-23", rate: 1.6 }],
+      latestDay: "2026-10-23",
+    });
+    expect((await client(s.app).api.fx.$get()).status).toBe(401);
   });
 });
 

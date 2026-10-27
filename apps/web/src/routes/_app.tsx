@@ -13,7 +13,7 @@ import { api, isUnauthenticated, send } from "../api.ts";
 import { NavItem } from "../components/links.tsx";
 import { SyncButton } from "../components/SyncButton.tsx";
 import { getLastAccount } from "../lib/storage.ts";
-import { accountsQuery, meQuery } from "../queries.ts";
+import { accountsQuery, fxQuery, meQuery } from "../queries.ts";
 
 /** Everything behind the login: the shell with the account switcher, sync and navigation. */
 export const Route = createFileRoute("/_app")({
@@ -25,7 +25,11 @@ export const Route = createFileRoute("/_app")({
       throw error;
     }
   },
-  loader: ({ context }) => context.queryClient.ensureQueryData(accountsQuery),
+  loader: ({ context }) =>
+    Promise.all([
+      context.queryClient.ensureQueryData(accountsQuery),
+      context.queryClient.ensureQueryData(fxQuery),
+    ]),
   component: Layout,
 });
 
@@ -176,6 +180,7 @@ function UserMenu() {
         </Button>
       </Menu.Target>
       <Menu.Dropdown>
+        <Menu.Item onClick={() => void navigate({ to: "/settings" })}>Settings</Menu.Item>
         <Menu.Item onClick={() => logout.mutate()}>Log out</Menu.Item>
       </Menu.Dropdown>
     </Menu>

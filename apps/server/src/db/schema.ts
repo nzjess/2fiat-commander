@@ -16,6 +16,7 @@ import {
   index,
   integer,
   primaryKey,
+  real,
   sqliteTable,
   text,
   unique,
@@ -36,8 +37,22 @@ export const users = sqliteTable("users", {
   id: integer().primaryKey({ autoIncrement: true }),
   username: text().notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  /** The currency amounts are shown in: one of `CURRENCIES` in `fx.ts`. Display only; money is stored in USD. */
+  displayCurrency: text("display_currency").notNull().default("USD"),
   createdAt: createdAt(),
 });
+
+/** The ECB's daily euro reference rates, mirrored from `FX_FROM` (see `fx.ts`). Working days only. */
+export const fxRates = sqliteTable(
+  "fx_rates",
+  {
+    currency: text().notNull(),
+    day: text().notNull(),
+    /** Units of `currency` per euro, as the ECB publishes it. */
+    perEur: real("per_eur").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.currency, t.day] })],
+);
 
 export const sessions = sqliteTable(
   "sessions",

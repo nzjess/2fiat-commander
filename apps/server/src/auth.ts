@@ -3,6 +3,7 @@ import { hash, verify } from "@node-rs/argon2";
 import { eq } from "drizzle-orm";
 import type { Db } from "./db/db.ts";
 import { sessions, users } from "./db/schema.ts";
+import { type Currency, isCurrency } from "./fx.ts";
 
 export const SESSION_COOKIE = "session";
 export const SESSION_TTL_MS = 30 * 86_400_000;
@@ -12,7 +13,15 @@ const SESSION_REFRESH_MS = 86_400_000;
 export interface SessionUser {
   id: number;
   username: string;
+  displayCurrency: Currency;
 }
+
+/** A user row as a session user. A currency since dropped from the whitelist falls back to USD. */
+const sessionUser = (row: { id: number; username: string; displayCurrency: string }): SessionUser => ({
+  id: row.id,
+  username: row.username,
+  displayCurrency: isCurrency(row.displayCurrency) ? row.displayCurrency : "USD",
+});
 
 /** argon2id at the library's defaults. */
 export const hashPassword = (password: string): Promise<string> => hash(password);
@@ -32,7 +41,7 @@ export async function checkPassword(
     await verify(await dummyHash, password);
     return undefined;
   }
-  return (await verify(user.passwordHash, password)) ? { id: user.id, username: user.username } : undefined;
+  return (await verify(user.passwordHash, password)) ? sessionUser(user) : undefined;
 }
 
 export function createUser(db: Db, username: string, passwordHash: string): number {
@@ -78,7 +87,12 @@ export function resolveSession(
 ): { user: SessionUser; renewedUntil?: Date } | undefined {
   const id = sessionId(token);
   const row = db
-    .select({ expiresAt: sessions.expiresAt, userId: users.id, username: users.username })
+    .select({
+      expiresAt: sessions.expiresAt,
+      id: users.id,
+      username: users.username,
+      displayCurrency: users.displayCurrency,
+    })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
     .where(eq(sessions.id, id))
@@ -88,11 +102,15 @@ export function resolveSession(
     db.delete(sessions).where(eq(sessions.id, id)).run();
     return undefined;
   }
-  const user = { id: row.userId, username: row.username };
+  const user = sessionUser(row);
   if (Date.parse(row.expiresAt) - now.getTime() > SESSION_TTL_MS - SESSION_REFRESH_MS) return { user };
   const renewedUntil = new Date(now.getTime() + SESSION_TTL_MS);
   db.update(sessions).set({ expiresAt: renewedUntil.toISOString() }).where(eq(sessions.id, id)).run();
   return { user, renewedUntil };
+}
+
+export function setDisplayCurrency(db: Db, userId: number, currency: Currency): void {
+  db.update(users).set({ displayCurrency: currency }).where(eq(users.id, userId)).run();
 }
 
 export function deleteSession(db: Db, token: string): void {

@@ -4,6 +4,7 @@ import { serve } from "@hono/node-server";
 import { createApp } from "./app.ts";
 import { loadConfig } from "./config.ts";
 import { openDb } from "./db/db.ts";
+import { FxMirror } from "./fx.ts";
 import { rebuildOutdated } from "./reevaluate.ts";
 import { Scheduler } from "./scheduler.ts";
 import { Secrets } from "./secrets.ts";
@@ -28,6 +29,8 @@ if (config.syncIntervalMinutes > 0) {
   new Scheduler({ db, runner, intervalMinutes: config.syncIntervalMinutes }).start();
   console.log(`syncing every ${config.syncIntervalMinutes} minutes`);
 }
+
+new FxMirror({ db }).start();
 
 serve(
   { fetch: createApp({ db, secrets, runner }).fetch, hostname: config.host, port: config.port },

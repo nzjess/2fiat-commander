@@ -11,6 +11,13 @@ export const meQuery = queryOptions({
   staleTime: Number.POSITIVE_INFINITY,
 });
 
+/** The display currency and its USD rates. Rates change daily, so an hour is fresh enough. */
+export const fxQuery = queryOptions({
+  queryKey: ["fx"],
+  queryFn: () => ok(api.fx.$get()),
+  staleTime: 3_600_000,
+});
+
 export const accountsQuery = queryOptions({
   queryKey: ["accounts", "list"],
   queryFn: () => ok(api.accounts.$get()),

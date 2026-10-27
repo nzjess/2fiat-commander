@@ -2,10 +2,12 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { deleteCookie, getCookie } from "hono/cookie";
 import { z } from "zod";
-import { checkPassword, createSession, deleteSession, SESSION_COOKIE } from "../auth.ts";
+import { checkPassword, createSession, deleteSession, SESSION_COOKIE, setDisplayCurrency } from "../auth.ts";
+import { CURRENCIES } from "../fx.ts";
 import { ApiError, type AppDeps, invalid, requireUser, setSessionCookie, type UserEnv } from "./common.ts";
 
 const Login = z.object({ username: z.string().min(1).max(200), password: z.string().min(1).max(1000) });
+const Settings = z.object({ displayCurrency: z.enum(CURRENCIES) });
 
 export function authRoutes(deps: AppDeps) {
   const now = deps.now ?? (() => new Date());
@@ -24,5 +26,10 @@ export function authRoutes(deps: AppDeps) {
       deleteCookie(c, SESSION_COOKIE, { path: "/" });
       return c.body(null, 204);
     })
-    .get("/me", requireUser(deps), (c) => c.json({ user: c.var.user }));
+    .get("/me", requireUser(deps), (c) => c.json({ user: c.var.user }))
+    .patch("/me", requireUser(deps), zValidator("json", Settings, invalid), (c) => {
+      const { displayCurrency } = c.req.valid("json");
+      setDisplayCurrency(deps.db, c.var.user.id, displayCurrency);
+      return c.json({ user: { ...c.var.user, displayCurrency } });
+    });
 }
