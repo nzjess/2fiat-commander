@@ -486,7 +486,7 @@ describe("cards and balances", () => {
     ).toBe(404);
   });
 
-  test("a logical card's spending is its money in and out, without transfers between its own cards", async () => {
+  test("a logical card's cash flow is its money in and out, without transfers between its own cards", async () => {
     const s = await synced();
     // $10 moves from A to B: a withdrawal on A, and a top-up on B a second later.
     s.twofiat.state.transactions.push(
@@ -500,7 +500,7 @@ describe("cards and balances", () => {
     const flows = async (logicalCardId: number | undefined) =>
       (
         await ok(
-          s.account["logical-cards"][":logicalCardId"].spending.$get({
+          s.account["logical-cards"][":logicalCardId"]["cash-flow"].$get({
             param: { ...s.param, logicalCardId: String(logicalCardId) },
           }),
         )
@@ -528,7 +528,7 @@ describe("cards and balances", () => {
     expect(merged.map((f) => f.description)).toContain("CAFE SPRINGFIELD USA");
     expect(
       (
-        await s.account["logical-cards"][":logicalCardId"].spending.$get({
+        await s.account["logical-cards"][":logicalCardId"]["cash-flow"].$get({
           param: { ...s.param, logicalCardId: "999" },
         })
       ).status,

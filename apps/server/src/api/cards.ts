@@ -4,6 +4,7 @@ import { and, asc, eq, gte, inArray, notExists, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { balanceHistory } from "../balanceHistory.ts";
+import { cashFlow } from "../cashflow.ts";
 import type { Db, Executor } from "../db/db.ts";
 import {
   balanceObservations,
@@ -14,7 +15,6 @@ import {
   openingBalances,
 } from "../db/schema.ts";
 import { reevaluate } from "../reevaluate.ts";
-import { spending } from "../spending.ts";
 import { type AccountEnv, ApiError, type AppDeps, idParam, invalid, notFound } from "./common.ts";
 
 type CardRow = typeof cards.$inferSelect;
@@ -334,9 +334,9 @@ export function cardRoutes(deps: AppDeps) {
         if (!history) throw notFound("logical card");
         return c.json(history);
       })
-      // A logical card's money in and out, for spending charts.
-      .get("/logical-cards/:logicalCardId/spending", (c) => {
-        const flows = spending(db, c.var.account.id, idParam(c, "logicalCardId", "logical card"));
+      // A logical card's money in and out, for the cash flow chart.
+      .get("/logical-cards/:logicalCardId/cash-flow", (c) => {
+        const flows = cashFlow(db, c.var.account.id, idParam(c, "logicalCardId", "logical card"));
         if (!flows) throw notFound("logical card");
         return c.json({ activities: flows });
       })

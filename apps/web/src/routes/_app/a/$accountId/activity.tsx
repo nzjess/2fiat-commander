@@ -24,6 +24,7 @@ import { ActivityDrawer } from "../../../../components/ActivityDrawer.tsx";
 import { ActivityTable } from "../../../../components/ActivityTable.tsx";
 import { CardPageHeader } from "../../../../components/CardPageHeader.tsx";
 import { ErrorView } from "../../../../components/status.tsx";
+import { groupColor, kindsByGroup } from "../../../../lib/cashflow.ts";
 import {
   ACTIVITY_KIND_LABELS,
   ACTIVITY_STATUS_FILTERS,
@@ -39,7 +40,6 @@ import {
   type PageSize,
   parseActivitySearch,
 } from "../../../../lib/search.ts";
-import { groupColor, kindsByGroup } from "../../../../lib/spending.ts";
 import { activitiesQuery, cardsQuery, findingsQuery, logicalCardsQuery } from "../../../../queries.ts";
 
 declare module "@tanstack/react-router" {
@@ -184,7 +184,7 @@ function Filters({
           style={{ flex: 1, minWidth: 260 }}
           comboboxProps={{ width: 280, position: "bottom-start" }}
           placeholder={search.kind ? undefined : "All kinds"}
-          // Under the spending chart's groups, each with its colour dot, as the table draws kinds.
+          // Under the cash flow chart's groups, each with its colour dot, as the table draws kinds.
           data={KIND_OPTIONS}
           // Tall enough for every kind and group heading (about 440px), so the list doesn't scroll.
           maxDropdownHeight={460}

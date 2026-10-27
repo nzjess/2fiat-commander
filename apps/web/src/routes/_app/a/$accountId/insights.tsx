@@ -4,16 +4,16 @@ import { createFileRoute } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { BalanceChart } from "../../../../components/BalanceChart.tsx";
 import { CardPageHeader } from "../../../../components/CardPageHeader.tsx";
+import { CashFlowChart } from "../../../../components/CashFlowChart.tsx";
 import { FeesPanel } from "../../../../components/FeeSchedules.tsx";
-import { SpendingChart } from "../../../../components/SpendingChart.tsx";
 import { parseInsightsSearch } from "../../../../lib/search.ts";
 import {
   accountQuery,
   balanceHistoryQuery,
+  cashFlowQuery,
   feeSchedulesQuery,
   feesQuery,
   logicalCardsQuery,
-  spendingQuery,
 } from "../../../../queries.ts";
 
 /** Every chart, graph and table about a logical card, in one place. */
@@ -25,7 +25,7 @@ export const Route = createFileRoute("/_app/a/$accountId/insights")({
     const id = deps.card ?? logicalCards[0]?.id;
     if (id === undefined || !logicalCards.some((l) => l.id === id)) return;
     await Promise.all([
-      queryClient.ensureQueryData(spendingQuery(accountId, id)),
+      queryClient.ensureQueryData(cashFlowQuery(accountId, id)),
       queryClient.ensureQueryData(balanceHistoryQuery(accountId, id)),
       queryClient.ensureQueryData(feesQuery(accountId, id)),
       queryClient.ensureQueryData(feeSchedulesQuery(accountId)),
@@ -54,8 +54,8 @@ function Insights() {
       {logical ? (
         // Keyed by card, so each chart starts afresh for another card.
         <Stack gap="xl" key={logical.id}>
-          <Section title="Spending">
-            <SpendingChart accountId={accountId} logicalCardId={logical.id} />
+          <Section title="Cash flow">
+            <CashFlowChart accountId={accountId} logicalCardId={logical.id} />
           </Section>
           <Section title="Balance over time">
             <BalanceChart accountId={accountId} logicalCardId={logical.id} />

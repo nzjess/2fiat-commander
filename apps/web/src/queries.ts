@@ -69,12 +69,12 @@ export const activityQuery = (accountId: string, activityId: number) =>
       ok(account.activities[":activityId"].$get({ param: { accountId, activityId: String(activityId) } })),
   });
 
-export const spendingQuery = (accountId: string, logicalCardId: number) =>
+export const cashFlowQuery = (accountId: string, logicalCardId: number) =>
   queryOptions({
-    queryKey: ["accounts", accountId, "spending", logicalCardId],
+    queryKey: ["accounts", accountId, "cash-flow", logicalCardId],
     queryFn: () =>
       ok(
-        account["logical-cards"][":logicalCardId"].spending.$get({
+        account["logical-cards"][":logicalCardId"]["cash-flow"].$get({
           param: { accountId, logicalCardId: String(logicalCardId) },
         }),
       ),

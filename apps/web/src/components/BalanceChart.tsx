@@ -49,7 +49,7 @@ export function BalanceChart({ accountId, logicalCardId }: { accountId: string; 
   const from = rangeStart(range, now);
   const rows =
     mode === "activity" ? activityRows(points, reported, from, now) : dailyRows(points, reported, from, now);
-  // The whole range, as the spending chart shows it, even before the card's first activity. A day's row sits at
+  // The whole range, as the cash flow chart shows it, even before the card's first activity. A day's row sits at
   // its midnight, so the first can start a little before the range does.
   const first = rows[0]?.t ?? now;
   const start = from === undefined ? first : Math.min(from, first);

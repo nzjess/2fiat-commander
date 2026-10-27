@@ -18,7 +18,7 @@ export interface Flow {
  * A logical card's money in and out, oldest first: every activity that moved its balance (holds included, as the
  * ledger counts them), except transfers between its own physical cards, which only move money within it.
  */
-export function spending(db: Db, accountId: number, logicalCardId: number): Flow[] | undefined {
+export function cashFlow(db: Db, accountId: number, logicalCardId: number): Flow[] | undefined {
   const ids = db
     .select({ id: cards.id })
     .from(cards)

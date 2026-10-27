@@ -12,20 +12,20 @@ import {
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { RANGES, type Range, rangeStart } from "../lib/balance.ts";
-import type { Money } from "../lib/fx.ts";
 import {
   BUCKETS,
   type Bucket,
+  type CashFlowRow,
+  cashFlowRows,
   defaultBucket,
   FLOW_GROUPS,
   type GroupKey,
   presentGroups,
-  type SpendingRow,
   seriesKey,
-  spendingRows,
   totals,
-} from "../lib/spending.ts";
-import { spendingQuery } from "../queries.ts";
+} from "../lib/cashflow.ts";
+import type { Money } from "../lib/fx.ts";
+import { cashFlowQuery } from "../queries.ts";
 import { useMoney } from "./Money.tsx";
 
 const ALL_GROUPS = FLOW_GROUPS.map((g) => g.key);
@@ -42,8 +42,8 @@ function periodLabel(t: number, bucket: Bucket): string {
  * A logical card's money in and out over time: a bar per activity, or totals per day, week or month, stacked by
  * kind with money in above the axis and money out below. Each kind can be toggled, e.g. to leave out top-ups.
  */
-export function SpendingChart({ accountId, logicalCardId }: { accountId: string; logicalCardId: number }) {
-  const { data } = useSuspenseQuery(spendingQuery(accountId, logicalCardId));
+export function CashFlowChart({ accountId, logicalCardId }: { accountId: string; logicalCardId: number }) {
+  const { data } = useSuspenseQuery(cashFlowQuery(accountId, logicalCardId));
   const theme = useMantineTheme();
   const [range, setRange] = useState<Range>("90d");
   const [bucket, setBucket] = useState<Bucket>(defaultBucket(90));
@@ -65,7 +65,7 @@ export function SpendingChart({ accountId, logicalCardId }: { accountId: string;
   const now = Date.now();
   const from = rangeStart(range, now);
   const present = presentGroups(flows);
-  const rows = spendingRows(flows, bucket, new Set(shown), from, now);
+  const rows = cashFlowRows(flows, bucket, new Set(shown), from, now);
   const sum = totals(rows);
   // Only the series with something in them, so empty ones don't take up room.
   const series = FLOW_GROUPS.flatMap((g) =>
@@ -157,7 +157,7 @@ export function SpendingChart({ accountId, logicalCardId }: { accountId: string;
         valueFormatter={(cents) => money.format(cents)}
         tooltipProps={{
           content: ({ active, payload }) => {
-            const row = payload?.[0]?.payload as SpendingRow | undefined;
+            const row = payload?.[0]?.payload as CashFlowRow | undefined;
             return active && row ? <Tip row={row} bucket={bucket} money={money} /> : null;
           },
         }}
@@ -199,7 +199,7 @@ function TimeBar(props: unknown) {
   );
 }
 
-function Tip({ row, bucket, money }: { row: SpendingRow; bucket: Bucket; money: Money }) {
+function Tip({ row, bucket, money }: { row: CashFlowRow; bucket: Bucket; money: Money }) {
   const when =
     bucket === "none"
       ? new Date(row.t).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })

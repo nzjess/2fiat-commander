@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  cashFlowRows,
   defaultBucket,
   FLOW_GROUPS,
   type Flow,
@@ -9,9 +10,8 @@ import {
   kindsByGroup,
   periodStart,
   presentGroups,
-  spendingRows,
   totals,
-} from "../src/lib/spending.ts";
+} from "../src/lib/cashflow.ts";
 
 // Local times: Monday 5 to Wednesday 21 October 2026.
 const at = (day: number, hour = 12) => new Date(2026, 9, day, hour).toISOString();
@@ -67,14 +67,14 @@ test("periods start at local midnight, on Monday, and on the first", () => {
 
 describe("rows", () => {
   test("ungrouped, a row per activity, in or out by its sign", () => {
-    const rows = spendingRows(flows, "none", all, undefined, now);
+    const rows = cashFlowRows(flows, "none", all, undefined, now);
     expect(rows).toHaveLength(6);
     expect(rows[1]).toMatchObject({ label: "purchase 6", purchases_out: -2000, outCents: -2000, count: 1 });
     expect(rows[4]).toMatchObject({ transfers_in: 500, inCents: 500 });
   });
 
   test("by week, totals per group and direction, with empty weeks kept", () => {
-    const rows = spendingRows(flows, "week", all, undefined, now);
+    const rows = cashFlowRows(flows, "week", all, undefined, now);
     expect(rows.map((r) => r.t)).toEqual([t(5), t(12), t(19)]);
     expect(rows[0]).toMatchObject({
       topups_in: 10_000,
@@ -88,7 +88,7 @@ describe("rows", () => {
   });
 
   test("a range starts at its first period, and a hidden group drops out of rows and totals", () => {
-    const rows = spendingRows(
+    const rows = cashFlowRows(
       flows,
       "day",
       new Set<GroupKey>(["purchases", "fees", "refunds"]),
@@ -101,7 +101,7 @@ describe("rows", () => {
   });
 
   test("nothing to chart without flows", () => {
-    expect(spendingRows([], "month", all, undefined, now)).toEqual([]);
+    expect(cashFlowRows([], "month", all, undefined, now)).toEqual([]);
   });
 });
 

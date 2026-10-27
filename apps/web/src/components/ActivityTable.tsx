@@ -1,11 +1,11 @@
 import { Badge, ColorSwatch, Group, Table, Text, Tooltip } from "@mantine/core";
 import type { Activity, ActivityKind, Card, LogicalCard } from "../api.ts";
+import { groupColor } from "../lib/cashflow.ts";
 import { ACTIVITY_KIND_LABELS, ACTIVITY_STATUS_LABELS, formatDateTime, lastFour } from "../lib/format.ts";
-import { groupColor } from "../lib/spending.ts";
 import { Amount } from "./Money.tsx";
 
 /**
- * An activity's kind, drawn like the spending chart's toggles: its group's colour dot, then the kind. So the same
+ * An activity's kind, drawn like the cash flow chart's toggles: its group's colour dot, then the kind. So the same
  * colour means the same thing on the chart and in the ledger.
  */
 export function KindTag({ kind }: { kind: ActivityKind }) {

@@ -60,7 +60,7 @@ export const BUCKETS = [
 ] as const;
 export type Bucket = (typeof BUCKETS)[number]["value"];
 
-export interface SpendingRow {
+export interface CashFlowRow {
   /** Epoch ms: the activity's time, or the period's start. */
   t: number;
   /** In cents, by series key: positive for money in, negative for money out. */
@@ -87,7 +87,7 @@ function nextPeriod(start: number, bucket: Exclude<Bucket, "none">): number {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + (bucket === "week" ? 7 : 1)).getTime();
 }
 
-function add(row: SpendingRow, flow: Flow) {
+function add(row: CashFlowRow, flow: Flow) {
   const direction = flow.amountCents > 0 ? "in" : "out";
   const key = seriesKey(groupOf(flow.kind), direction);
   row[key] = ((row[key] as number | undefined) ?? 0) + flow.amountCents;
@@ -100,20 +100,20 @@ function add(row: SpendingRow, flow: Flow) {
  * The rows for the flows from `from` (all of them when undefined) to `now`, leaving out groups not in `shown`.
  * With no bucket, a row per activity; otherwise a row per period, empty ones included so time reads evenly.
  */
-export function spendingRows(
+export function cashFlowRows(
   flows: Flow[],
   bucket: Bucket,
   shown: ReadonlySet<GroupKey>,
   from: number | undefined,
   now: number,
-): SpendingRow[] {
+): CashFlowRow[] {
   const inRange = flows.filter((f) => {
     const t = Date.parse(f.at);
     return shown.has(groupOf(f.kind)) && (from === undefined || t >= from) && t <= now;
   });
   if (bucket === "none") {
     return inRange.map((f) => {
-      const row: SpendingRow = {
+      const row: CashFlowRow = {
         t: Date.parse(f.at),
         label: f.description,
         inCents: 0,
@@ -126,11 +126,11 @@ export function spendingRows(
   }
   const first = from ?? (inRange[0] ? Date.parse(inRange[0].at) : undefined);
   if (first === undefined) return [];
-  const rows: SpendingRow[] = [];
+  const rows: CashFlowRow[] = [];
   let i = 0;
   for (let start = periodStart(first, bucket); start <= now; start = nextPeriod(start, bucket)) {
     const end = nextPeriod(start, bucket);
-    const row: SpendingRow = { t: start, inCents: 0, outCents: 0, count: 0 };
+    const row: CashFlowRow = { t: start, inCents: 0, outCents: 0, count: 0 };
     for (; i < inRange.length && Date.parse((inRange[i] as Flow).at) < end; i++) add(row, inRange[i] as Flow);
     rows.push(row);
   }
@@ -138,7 +138,7 @@ export function spendingRows(
 }
 
 /** Totals over rows: money in, money out and the net. */
-export function totals(rows: SpendingRow[]) {
+export function totals(rows: CashFlowRow[]) {
   const inCents = rows.reduce((s, r) => s + r.inCents, 0);
   const outCents = rows.reduce((s, r) => s + r.outCents, 0);
   return { inCents, outCents, netCents: inCents + outCents };
