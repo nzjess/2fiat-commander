@@ -19,6 +19,7 @@ import { useState } from "react";
 import { type Activity, api, type Category, type CategoryColor, ok, send } from "../api.ts";
 import { CATEGORY_COLORS, CATEGORY_PALETTE, categoryHex } from "../lib/categories.ts";
 import { categoriesQuery, sameMerchantQuery } from "../queries.ts";
+import { RuleTag, useAlwaysForMerchant } from "./Rules.tsx";
 import { ErrorView } from "./status.tsx";
 
 /** A category colour key as the hex for the current colour scheme. */
@@ -51,7 +52,10 @@ function useAnnotationChanged(accountId: string) {
     ]);
 }
 
-type Annotated = Pick<Activity, "id" | "categorizable" | "categoryId" | "note" | "description">;
+type Annotated = Pick<
+  Activity,
+  "id" | "categorizable" | "categoryId" | "categoryRuleId" | "note" | "description"
+>;
 
 /**
  * An activity's category and note, as the drawer edits them. Spending takes a category (typing a new name creates
@@ -86,6 +90,7 @@ export function ActivityAnnotation({ accountId, activity }: { accountId: string;
           }
         />
       )}
+      {activity.categoryRuleId !== null && <RuleTag ruleId={activity.categoryRuleId} />}
       {offer && (
         <SameMerchantOffer
           accountId={accountId}
@@ -240,6 +245,7 @@ function SameMerchantOffer({
       ),
     onSuccess: changed,
   });
+  const always = useAlwaysForMerchant(category);
   const ids = data?.activityIds ?? [];
   if (apply.isSuccess) {
     return (
@@ -248,25 +254,56 @@ function SameMerchantOffer({
       </Text>
     );
   }
-  if (ids.length === 0) return null;
+  if (always.isSuccess) {
+    return (
+      <Text size="xs" c="dimmed">
+        New activities from this merchant will be {category.name}
+        {always.data.count > 0 && `, and ${always.data.count} existing ones are now`}.
+      </Text>
+    );
+  }
+  if (!data) return null;
   const others = `${ids.length} other uncategorised ${ids.length === 1 ? "activity" : "activities"}`;
   return (
     <Paper withBorder p="xs" radius="md">
       <Text size="sm">
-        Also set <b>{category.name}</b> on {others} from this merchant?
+        {ids.length > 0 ? (
+          <>
+            Also set <b>{category.name}</b> on {others} from this merchant?
+          </>
+        ) : (
+          <>
+            Always use <b>{category.name}</b> for this merchant?
+          </>
+        )}
       </Text>
       <Text size="xs" c="dimmed">
         Matched on "{activity.description}", leaving out the country and any reference numbers.
       </Text>
       <Group gap="xs" mt="xs">
-        <Button size="compact-xs" variant="light" loading={apply.isPending} onClick={() => apply.mutate(ids)}>
-          Set on all {ids.length}
+        {ids.length > 0 && (
+          <Button
+            size="compact-xs"
+            variant="light"
+            loading={apply.isPending}
+            onClick={() => apply.mutate(ids)}
+          >
+            Set on all {ids.length}
+          </Button>
+        )}
+        <Button
+          size="compact-xs"
+          variant="light"
+          loading={always.isPending}
+          onClick={() => always.mutate(activity.description)}
+        >
+          Always use {category.name} for this merchant
         </Button>
         <Button size="compact-xs" variant="light" color="gray" onClick={onDone}>
           No thanks
         </Button>
       </Group>
-      {apply.error && <ErrorView error={apply.error} />}
+      {(apply.error ?? always.error) && <ErrorView error={apply.error ?? always.error} />}
     </Paper>
   );
 }
@@ -422,8 +459,11 @@ function CategoryRow({ category, onChanged }: { category: Category; onChanged: (
           <Text size="sm">
             Delete {category.name}?{" "}
             {category.activityCount > 0
-              ? `Its ${uses} become uncategorised, keeping their notes.`
-              : "It isn't on any activity."}
+              ? `Its ${uses} ${category.activityCount === 1 ? "becomes uncategorised, keeping its note" : "become uncategorised, keeping their notes"}`
+              : "It isn't on any activity"}
+            {category.ruleCount > 0 &&
+              `, and ${category.ruleCount === 1 ? "the rule that sets it is" : `the ${category.ruleCount} rules that set it are`} deleted too`}
+            .
           </Text>
           <Group gap="xs" mt="xs">
             <Button size="compact-xs" color="red" loading={remove.isPending} onClick={() => remove.mutate()}>

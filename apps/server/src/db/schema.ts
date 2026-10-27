@@ -22,7 +22,7 @@ import {
   unique,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import type { CategoryColor } from "../categories.ts";
+import type { CategoryColor, RuleMatch } from "../categories.ts";
 
 // Conventions: our own integer primary keys everywhere, 2fiat's ids in `twofiat_id` columns (unique per account).
 // Times are ISO-8601 UTC text from `toISOString()` (raw rows' `created_at` too), so they sort and compare as
@@ -355,6 +355,29 @@ export const categories = sqliteTable(
   (t) => [unique("categories_user_name").on(t.userId, t.name)],
 );
 
+/**
+ * The user's rules for categorising new spending, in their order (the first match wins). A rule only ever fills an
+ * uncategorised activity; see `categories.ts`.
+ */
+export const categoryRules = sqliteTable(
+  "category_rules",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    categoryId: integer("category_id")
+      .notNull()
+      .references(() => categories.id, { onDelete: "cascade" }),
+    /** `merchant`: the pattern is a `merchantKey`. `contains`: text in the description or the posted one. */
+    match: text().$type<RuleMatch>().notNull(),
+    pattern: text().notNull(),
+    position: integer().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [unique("category_rules_user_match_pattern").on(t.userId, t.match, t.pattern)],
+);
+
 /** The user's own fields on an activity. Kept apart from `activities`, so re-normalisation never touches them. */
 export const activityAnnotations = sqliteTable(
   "activity_annotations",
@@ -364,13 +387,18 @@ export const activityAnnotations = sqliteTable(
       .references(() => activities.id, { onDelete: "cascade" }),
     /** Only on kinds that are spending (`CATEGORY_KINDS`); the API enforces it. */
     categoryId: integer("category_id").references(() => categories.id, { onDelete: "set null" }),
+    /** The rule that set the category, if one did; a change by the user clears it. */
+    categoryRuleId: integer("category_rule_id").references(() => categoryRules.id, { onDelete: "set null" }),
     /** No length CHECK: merging two activities joins their notes. The API limits what the user enters. */
     note: text(),
     updatedAt: text("updated_at")
       .notNull()
       .$defaultFn(() => now()),
   },
-  (t) => [index("activity_annotations_category").on(t.categoryId)],
+  (t) => [
+    index("activity_annotations_category").on(t.categoryId),
+    index("activity_annotations_rule").on(t.categoryRuleId),
+  ],
 );
 
 /** One pull from 2fiat, and the normalisation and evaluation that follow it. */

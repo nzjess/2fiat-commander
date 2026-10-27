@@ -86,3 +86,5 @@ export type CardFees = Body<AccountApi["logical-cards"][":logicalCardId"]["fees"
 export type ActivityDetail = Body<AccountApi["activities"][":activityId"]["$get"]>;
 export type Category = Body<typeof api.categories.$get>[number];
 export type CategoryColor = Category["color"];
+export type Rule = Body<typeof api.categories.rules.$get>[number];
+export type RuleMatch = Rule["match"];

@@ -49,13 +49,16 @@ CREATE UNIQUE INDEX `activities_account_key` ON `activities` (`account_id`,`key`
 CREATE TABLE `activity_annotations` (
 	`activity_id` integer PRIMARY KEY NOT NULL,
 	`category_id` integer,
+	`category_rule_id` integer,
 	`note` text,
 	`updated_at` text NOT NULL,
 	FOREIGN KEY (`activity_id`) REFERENCES `activities`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`category_id`) REFERENCES `categories`(`id`) ON UPDATE no action ON DELETE set null
+	FOREIGN KEY (`category_id`) REFERENCES `categories`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`category_rule_id`) REFERENCES `category_rules`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
 CREATE INDEX `activity_annotations_category` ON `activity_annotations` (`category_id`);--> statement-breakpoint
+CREATE INDEX `activity_annotations_rule` ON `activity_annotations` (`category_rule_id`);--> statement-breakpoint
 CREATE TABLE `activity_sources` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`activity_id` integer NOT NULL,
@@ -149,6 +152,19 @@ CREATE TABLE `categories` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `categories_user_name` ON `categories` (`user_id`,`name`);--> statement-breakpoint
+CREATE TABLE `category_rules` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`user_id` integer NOT NULL,
+	`category_id` integer NOT NULL,
+	`match` text NOT NULL,
+	`pattern` text NOT NULL,
+	`position` integer NOT NULL,
+	`created_at` text NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`category_id`) REFERENCES `categories`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `category_rules_user_match_pattern` ON `category_rules` (`user_id`,`match`,`pattern`);--> statement-breakpoint
 CREATE TABLE `evaluations` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`account_id` integer NOT NULL,

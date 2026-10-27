@@ -1,5 +1,6 @@
 import { type Activity, LOOKBACK_DAYS, NORMALIZER_VERSION, normalize } from "@twofiat/client";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import { applyRulesIn, lastActivityId } from "./categories.ts";
 import { chunks, type Db, type Executor, IMMEDIATE } from "./db/db.ts";
 import {
   accounts,
@@ -22,7 +23,8 @@ export interface RenormalizeResult {
 
 /**
  * Brings an account's ledger up to date with its raw rows: re-normalises from `LOOKBACK_DAYS` before where ingest
- * marked it dirty (everything after `markForRebuild`), then marks it clean, in one transaction. Returns undefined
+ * marked it dirty (everything after `markForRebuild`), sets the user's category rules on the new spending, then
+ * marks it clean, in one transaction. Returns undefined
  * when the ledger was already up to date.
  */
 export function normalizeAccount(db: Db, accountId: number): RenormalizeResult | undefined {
@@ -33,7 +35,10 @@ export function normalizeAccount(db: Db, accountId: number): RenormalizeResult |
       .where(eq(accounts.id, accountId))
       .get()?.dirtyFrom;
     if (dirtyFrom === null || dirtyFrom === undefined) return undefined;
+    const before = lastActivityId(q);
     const result = renormalizeIn(q, accountId, dirtyFrom && daysBefore(dirtyFrom, LOOKBACK_DAYS));
+    // New spending takes the user's category rules; what was already there keeps whatever it had.
+    applyRulesIn(q, accountId, before);
     q.update(accounts).set({ ledgerDirtyFrom: null }).where(eq(accounts.id, accountId)).run();
     return result;
   }, IMMEDIATE);
@@ -230,13 +235,23 @@ function mergeAnnotation(q: Executor, into: number, from: Annotation) {
   const existing = q.select().from(activityAnnotations).where(eq(activityAnnotations.activityId, into)).get();
   if (!existing) {
     q.insert(activityAnnotations)
-      .values({ activityId: into, categoryId: from.categoryId, note: from.note })
+      .values({
+        activityId: into,
+        categoryId: from.categoryId,
+        categoryRuleId: from.categoryRuleId,
+        note: from.note,
+      })
       .run();
     return;
   }
   const note = [existing.note, from.note].filter(Boolean).join("\n\n") || null;
+  // The category comes with the rule that set it, if one did.
+  const category =
+    existing.categoryId !== null
+      ? { categoryId: existing.categoryId, categoryRuleId: existing.categoryRuleId }
+      : { categoryId: from.categoryId, categoryRuleId: from.categoryRuleId };
   q.update(activityAnnotations)
-    .set({ categoryId: existing.categoryId ?? from.categoryId, note, updatedAt: new Date().toISOString() })
+    .set({ ...category, note, updatedAt: new Date().toISOString() })
     .where(eq(activityAnnotations.activityId, into))
     .run();
 }

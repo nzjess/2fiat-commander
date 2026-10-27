@@ -24,6 +24,12 @@ export const categoriesQuery = queryOptions({
   queryFn: () => ok(api.categories.$get()),
 });
 
+/** The user's category rules, in order. Under ["categories"], so a category change refreshes them too. */
+export const rulesQuery = queryOptions({
+  queryKey: ["categories", "rules"],
+  queryFn: () => ok(api.categories.rules.$get()),
+});
+
 export const accountsQuery = queryOptions({
   queryKey: ["accounts", "list"],
   queryFn: () => ok(api.accounts.$get()),

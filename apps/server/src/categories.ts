@@ -1,7 +1,7 @@
 import { merchantKey } from "@twofiat/client";
-import { and, asc, count, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
-import { type Db, IMMEDIATE } from "./db/db.ts";
-import { activities, activityAnnotations, categories } from "./db/schema.ts";
+import { and, asc, count, eq, gt, inArray, isNull, max, ne, or, sql } from "drizzle-orm";
+import { chunks, type Db, type Executor, IMMEDIATE } from "./db/db.ts";
+import { accounts, activities, activityAnnotations, categories, categoryRules } from "./db/schema.ts";
 
 /**
  * The category palette, in the order new categories take them. Keys, not colours: the web app maps each to its
@@ -35,7 +35,10 @@ export class DuplicateCategoryError extends Error {
   }
 }
 
-/** The user's categories by name, each with how many activities (in all their accounts) it's on. */
+/**
+ * The user's categories by name, each with how many activities (in all their accounts) it's on, and how many rules
+ * set it (deleting the category deletes them).
+ */
 export function listCategories(db: Db, userId: number) {
   return db
     .select({
@@ -43,6 +46,7 @@ export function listCategories(db: Db, userId: number) {
       name: categories.name,
       color: categories.color,
       activityCount: count(activityAnnotations.activityId),
+      ruleCount: sql<number>`(SELECT count(*) FROM ${categoryRules} WHERE ${categoryRules.categoryId} = ${categories.id})`,
     })
     .from(categories)
     .leftJoin(activityAnnotations, eq(activityAnnotations.categoryId, categories.id))
@@ -143,7 +147,8 @@ export interface AnnotationChanges {
  */
 export function annotate(db: Db, activityId: number, changes: AnnotationChanges): void {
   const set = {
-    ...(changes.categoryId !== undefined && { categoryId: changes.categoryId }),
+    // The user's own choice: no longer a rule's.
+    ...(changes.categoryId !== undefined && { categoryId: changes.categoryId, categoryRuleId: null }),
     ...(changes.note !== undefined && { note: changes.note?.trim() || null }),
     updatedAt: new Date().toISOString(),
   };
@@ -163,7 +168,10 @@ export function categorize(db: Db, activityIds: number[], categoryId: number): v
     for (const activityId of activityIds)
       db.insert(activityAnnotations)
         .values({ activityId, categoryId, updatedAt })
-        .onConflictDoUpdate({ target: activityAnnotations.activityId, set: { categoryId, updatedAt } })
+        .onConflictDoUpdate({
+          target: activityAnnotations.activityId,
+          set: { categoryId, categoryRuleId: null, updatedAt },
+        })
         .run();
   }, IMMEDIATE);
 }
@@ -191,4 +199,249 @@ export function sameMerchant(db: Db, accountId: number, description: string, exc
     .all()
     .filter((a) => merchantKey(a.description) === key)
     .map((a) => a.id);
+}
+
+// Rules: each sets a category on uncategorised spending that matches it. They run on a sync's new activities (the
+// first match wins), and on existing ones only when the user asks. They never replace a category already set.
+
+export const RULE_MATCHES = ["merchant", "contains"] as const;
+export type RuleMatch = (typeof RULE_MATCHES)[number];
+export type RuleRow = typeof categoryRules.$inferSelect;
+type RuleCondition = Pick<RuleRow, "match" | "pattern">;
+type Described = { description: string; postedDescription: string | null };
+
+export class DuplicateRuleError extends Error {
+  constructor() {
+    super("there's already a rule for that");
+    this.name = "DuplicateRuleError";
+  }
+}
+
+/** What a rule stores for what was entered: a merchant's `merchantKey`, or the text in lower case. */
+export function rulePattern(match: RuleMatch, input: string): string {
+  return match === "merchant" ? merchantKey(input) : input.trim().toLowerCase();
+}
+
+export function ruleMatches(rule: RuleCondition, activity: Described): boolean {
+  if (rule.match === "merchant") return merchantKey(activity.description) === rule.pattern;
+  return [activity.description, activity.postedDescription].some((d) =>
+    d?.toLowerCase().includes(rule.pattern),
+  );
+}
+
+/** The user's rules in order, each with how many activities it has set. */
+export function listRules(db: Db, userId: number) {
+  return db
+    .select({
+      id: categoryRules.id,
+      categoryId: categoryRules.categoryId,
+      match: categoryRules.match,
+      pattern: categoryRules.pattern,
+      position: categoryRules.position,
+      activityCount: count(activityAnnotations.activityId),
+    })
+    .from(categoryRules)
+    .leftJoin(activityAnnotations, eq(activityAnnotations.categoryRuleId, categoryRules.id))
+    .where(eq(categoryRules.userId, userId))
+    .groupBy(categoryRules.id)
+    .orderBy(asc(categoryRules.position), asc(categoryRules.id))
+    .all();
+}
+
+function assertRuleFree(db: Db, userId: number, rule: RuleCondition, except?: number) {
+  const clash = db
+    .select({ id: categoryRules.id })
+    .from(categoryRules)
+    .where(
+      and(
+        eq(categoryRules.userId, userId),
+        eq(categoryRules.match, rule.match),
+        eq(categoryRules.pattern, rule.pattern),
+        except === undefined ? undefined : ne(categoryRules.id, except),
+      ),
+    )
+    .get();
+  if (clash) throw new DuplicateRuleError();
+}
+
+/** A new rule, last in the order. The caller checks the category is the user's and the pattern isn't empty. */
+export function createRule(db: Db, userId: number, rule: RuleCondition & { categoryId: number }): RuleRow {
+  return db.transaction(() => {
+    assertRuleFree(db, userId, rule);
+    const last = db
+      .select({ position: max(categoryRules.position) })
+      .from(categoryRules)
+      .where(eq(categoryRules.userId, userId))
+      .get()?.position;
+    return db
+      .insert(categoryRules)
+      .values({ userId, ...rule, position: (last ?? -1) + 1 })
+      .returning()
+      .get();
+  }, IMMEDIATE);
+}
+
+/**
+ * Changes a rule. With `move`, the activities it set follow it to its new category; otherwise they keep theirs and
+ * are no longer marked as its.
+ */
+export function updateRule(
+  db: Db,
+  rule: RuleRow,
+  changes: Partial<RuleCondition> & { categoryId?: number },
+  { move = false }: { move?: boolean } = {},
+): RuleRow {
+  return db.transaction(() => {
+    const next = { ...rule, ...changes };
+    assertRuleFree(db, rule.userId, next, rule.id);
+    if (next.categoryId !== rule.categoryId) {
+      db.update(activityAnnotations)
+        .set(move ? { categoryId: next.categoryId } : { categoryRuleId: null })
+        .where(eq(activityAnnotations.categoryRuleId, rule.id))
+        .run();
+    }
+    return (
+      db.update(categoryRules).set(changes).where(eq(categoryRules.id, rule.id)).returning().get() ?? rule
+    );
+  }, IMMEDIATE);
+}
+
+/** Deletes a rule. The categories it set stay, unless `clear`, which makes those activities uncategorised again. */
+export function deleteRule(db: Db, ruleId: number, { clear = false }: { clear?: boolean } = {}): void {
+  db.transaction(() => {
+    if (clear) {
+      const set = db
+        .select({ id: activityAnnotations.activityId })
+        .from(activityAnnotations)
+        .where(eq(activityAnnotations.categoryRuleId, ruleId))
+        .all()
+        .map((a) => a.id);
+      db.update(activityAnnotations)
+        .set({ categoryId: null, categoryRuleId: null })
+        .where(eq(activityAnnotations.categoryRuleId, ruleId))
+        .run();
+      for (const chunk of chunks(set)) deleteEmpty(db, chunk);
+    }
+    db.delete(categoryRules).where(eq(categoryRules.id, ruleId)).run();
+  }, IMMEDIATE);
+}
+
+/** Puts the user's rules in the given order, which must name each of them once. Returns false if it doesn't. */
+export function reorderRules(db: Db, userId: number, ids: number[]): boolean {
+  return db.transaction(() => {
+    const mine = db
+      .select({ id: categoryRules.id })
+      .from(categoryRules)
+      .where(eq(categoryRules.userId, userId))
+      .all()
+      .map((r) => r.id);
+    if (
+      ids.length !== mine.length ||
+      new Set(ids).size !== ids.length ||
+      !ids.every((id) => mine.includes(id))
+    )
+      return false;
+    ids.forEach((id, position) => {
+      db.update(categoryRules).set({ position }).where(eq(categoryRules.id, id)).run();
+    });
+    return true;
+  }, IMMEDIATE);
+}
+
+/** Uncategorised spending, in all the user's accounts, or one account's from after `afterId` (a sync's new ones). */
+function uncategorized(q: Executor, scope: { userId: number } | { accountId: number; afterId: number }) {
+  return q
+    .select({
+      id: activities.id,
+      description: activities.description,
+      postedDescription: activities.postedDescription,
+    })
+    .from(activities)
+    .leftJoin(activityAnnotations, eq(activityAnnotations.activityId, activities.id))
+    .where(
+      and(
+        "userId" in scope
+          ? inArray(
+              activities.accountId,
+              q.select({ id: accounts.id }).from(accounts).where(eq(accounts.userId, scope.userId)),
+            )
+          : and(eq(activities.accountId, scope.accountId), gt(activities.id, scope.afterId)),
+        inArray(activities.kind, [...CATEGORY_KINDS]),
+        isNull(activityAnnotations.categoryId),
+      ),
+    )
+    .all();
+}
+
+/**
+ * Sets a rule's category on activities, as that rule's, wherever no category has been set meanwhile. Returns how
+ * many it set.
+ */
+function setByRule(q: Executor, activityIds: number[], rule: Pick<RuleRow, "id" | "categoryId">): number {
+  const updatedAt = new Date().toISOString();
+  const set = { categoryId: rule.categoryId, categoryRuleId: rule.id, updatedAt };
+  let changed = 0;
+  for (const activityId of activityIds)
+    changed += q
+      .insert(activityAnnotations)
+      .values({ activityId, ...set })
+      .onConflictDoUpdate({
+        target: activityAnnotations.activityId,
+        set,
+        setWhere: isNull(activityAnnotations.categoryId),
+      })
+      .run().changes;
+  return changed;
+}
+
+/** The uncategorised spending, in all the user's accounts, that a rule (saved or not) would categorise. */
+export function ruleCandidates(db: Db, userId: number, rule: RuleCondition): number[] {
+  return uncategorized(db, { userId })
+    .filter((a) => ruleMatches(rule, a))
+    .map((a) => a.id);
+}
+
+/** Applies a rule to the existing uncategorised spending it matches, in all the user's accounts. Returns how many. */
+export function applyRule(db: Db, rule: RuleRow): number {
+  return db.transaction(() => {
+    return setByRule(db, ruleCandidates(db, rule.userId, rule), rule);
+  }, IMMEDIATE);
+}
+
+/** The newest activity id, so a sync can tell the activities its normalisation adds: they get higher ids. */
+export function lastActivityId(q: Executor): number {
+  return (
+    q
+      .select({ id: max(activities.id) })
+      .from(activities)
+      .get()?.id ?? 0
+  );
+}
+
+/**
+ * Categorises a sync's new spending in an account (ids after `afterId`) by the user's rules, the first match
+ * winning, in the caller's transaction. Returns how many it set.
+ */
+export function applyRulesIn(q: Executor, accountId: number, afterId: number): number {
+  const userId = q
+    .select({ userId: accounts.userId })
+    .from(accounts)
+    .where(eq(accounts.id, accountId))
+    .get()?.userId;
+  if (userId === undefined) return 0;
+  const rules = q
+    .select()
+    .from(categoryRules)
+    .where(eq(categoryRules.userId, userId))
+    .orderBy(asc(categoryRules.position), asc(categoryRules.id))
+    .all();
+  if (rules.length === 0) return 0;
+  const byRule = new Map<RuleRow, number[]>();
+  for (const a of uncategorized(q, { accountId, afterId })) {
+    const rule = rules.find((r) => ruleMatches(r, a));
+    if (rule) byRule.set(rule, [...(byRule.get(rule) ?? []), a.id]);
+  }
+  let set = 0;
+  for (const [rule, ids] of byRule) set += setByRule(q, ids, rule);
+  return set;
 }

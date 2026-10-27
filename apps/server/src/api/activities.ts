@@ -27,7 +27,7 @@ import { daysBefore } from "../time.ts";
 import { type AccountEnv, ApiError, type AppDeps, idParam, invalid, notFound } from "./common.ts";
 
 type ActivityRow = typeof activities.$inferSelect;
-type Annotation = Pick<typeof activityAnnotations.$inferSelect, "categoryId" | "note">;
+type Annotation = Pick<typeof activityAnnotations.$inferSelect, "categoryId" | "categoryRuleId" | "note">;
 
 /** Kinds whose pending authorisation should post within days; older ones are stale, as reconcile reports them. */
 const STALE_KINDS = ["purchase", "refund"] as const;
@@ -59,6 +59,8 @@ function activityDto(a: ActivityRow, annotation: Annotation | null, staleBefore:
     /** Whether it's spending, which can take a category. */
     categorizable: takesCategory(a.kind),
     categoryId: annotation?.categoryId ?? null,
+    /** The rule that set the category, if one did. */
+    categoryRuleId: annotation?.categoryRuleId ?? null,
     note: annotation?.note ?? null,
   };
 }
@@ -135,7 +137,11 @@ export function activityRoutes(deps: AppDeps) {
   };
   const annotationOf = (activityId: number): Annotation | null =>
     db
-      .select({ categoryId: activityAnnotations.categoryId, note: activityAnnotations.note })
+      .select({
+        categoryId: activityAnnotations.categoryId,
+        categoryRuleId: activityAnnotations.categoryRuleId,
+        note: activityAnnotations.note,
+      })
       .from(activityAnnotations)
       .where(eq(activityAnnotations.activityId, activityId))
       .get() ?? null;
@@ -168,7 +174,11 @@ export function activityRoutes(deps: AppDeps) {
         const rows = db
           .select({
             activity: activities,
-            annotation: { categoryId: activityAnnotations.categoryId, note: activityAnnotations.note },
+            // Flat, not a nested object: Drizzle drops a left-joined object whose first column is null, which
+            // would lose a note on an uncategorised activity.
+            categoryId: activityAnnotations.categoryId,
+            categoryRuleId: activityAnnotations.categoryRuleId,
+            note: activityAnnotations.note,
           })
           .from(activities)
           .leftJoin(activityAnnotations, eq(activityAnnotations.activityId, activities.id))
@@ -240,7 +250,7 @@ export function activityRoutes(deps: AppDeps) {
         const page = rows.slice(0, query.limit);
         const last = page.at(-1);
         return c.json({
-          items: page.map((r) => activityDto(r.activity, r.annotation, staleBefore)),
+          items: page.map(({ activity, ...annotation }) => activityDto(activity, annotation, staleBefore)),
           nextCursor: rows.length > query.limit && last ? encodeCursor(last.activity) : null,
         });
       })

@@ -8,7 +8,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { AccountArchivedError, DuplicateAccountError } from "../accounts.ts";
 import { AdjustmentNotFoundError } from "../adjustments.ts";
 import { resolveSession, SESSION_COOKIE, type SessionUser } from "../auth.ts";
-import { DuplicateCategoryError } from "../categories.ts";
+import { DuplicateCategoryError, DuplicateRuleError } from "../categories.ts";
 import type { Db } from "../db/db.ts";
 import { accounts } from "../db/schema.ts";
 import { LedgerNotReadyError } from "../evaluate.ts";
@@ -56,6 +56,7 @@ function toApiError(err: Error): ApiError | undefined {
   if (err instanceof DuplicateAccountError) return new ApiError(409, "duplicate_account", err.message);
   if (err instanceof AccountArchivedError) return new ApiError(409, "account_archived", err.message);
   if (err instanceof DuplicateCategoryError) return new ApiError(409, "duplicate_category", err.message);
+  if (err instanceof DuplicateRuleError) return new ApiError(409, "duplicate_rule", err.message);
   if (err instanceof AdjustmentNotFoundError) return new ApiError(404, "not_found", err.message);
   if (err instanceof SyncAlreadyRunningError) return new ApiError(409, "sync_running", err.message);
   if (err instanceof LedgerNotReadyError) return new ApiError(409, "ledger_not_ready", err.message);

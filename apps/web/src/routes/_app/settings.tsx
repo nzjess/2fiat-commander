@@ -3,15 +3,17 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { createFileRoute } from "@tanstack/react-router";
 import { api, ok } from "../../api.ts";
 import { CategoryManager } from "../../components/Categories.tsx";
+import { RuleManager } from "../../components/Rules.tsx";
 import { ErrorView } from "../../components/status.tsx";
 import { formatDate } from "../../lib/format.ts";
-import { categoriesQuery, fxQuery, meQuery } from "../../queries.ts";
+import { categoriesQuery, fxQuery, meQuery, rulesQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/_app/settings")({
   loader: ({ context }) =>
     Promise.all([
       context.queryClient.ensureQueryData(fxQuery),
       context.queryClient.ensureQueryData(categoriesQuery),
+      context.queryClient.ensureQueryData(rulesQuery),
     ]),
   component: Settings,
 });
@@ -66,6 +68,13 @@ function Settings() {
         categories are shared by all your accounts.
       </Text>
       <CategoryManager />
+      <Divider my="sm" />
+      <Title order={4}>Rules</Title>
+      <Text size="sm" c="dimmed">
+        Rules set a category on new purchases and refunds at each sync, the first matching rule winning. They
+        never change a category already set, and apply to existing activities only when you ask.
+      </Text>
+      <RuleManager />
     </Stack>
   );
 }

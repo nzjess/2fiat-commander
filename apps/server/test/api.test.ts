@@ -719,6 +719,12 @@ describe("categories and notes", () => {
     expect(await ok(annotate(fee, { note: "every purchase has one" }))).toMatchObject({
       note: "every purchase has one",
     });
+    // The list shows a note on an activity with no category too.
+    expect(
+      (await ok(activities.$get({ param: s.param, query: { kind: "fee" } }))).items.find(
+        (a) => a.id === fee.id,
+      ),
+    ).toMatchObject({ categoryId: null, note: "every purchase has one" });
     expect((await annotate(shop, { categoryId: 999 })).status).toBe(400);
     expect((await annotate(shop, { note: "x".repeat(2001) })).status).toBe(400);
 
@@ -804,6 +810,207 @@ describe("categories and notes", () => {
     });
     // Categorised ones are no longer offered.
     expect(await same()).toEqual([]);
+  });
+});
+
+describe("category rules", () => {
+  const rulesApi = (s: Awaited<ReturnType<typeof synced>>) => s.api.categories.rules;
+  const purchases = async (s: Awaited<ReturnType<typeof synced>>) =>
+    (await ok(s.account.activities.$get({ param: s.param, query: { kind: "purchase,refund" } }))).items;
+
+  test("are kept per user, in order, with their patterns stored as matched", async () => {
+    const s = await synced();
+    const groceries = await ok(s.api.categories.$post({ json: { name: "Groceries" } }));
+    const rules = rulesApi(s);
+    const merchant = await ok(
+      rules.$post({
+        json: { categoryId: groceries.id, match: "merchant", pattern: "SHOP 0042 SPRINGFIELD USA" },
+      }),
+    );
+    expect(merchant).toMatchObject({
+      match: "merchant",
+      pattern: "shop springfield",
+      position: 0,
+      activityCount: 0,
+    });
+    const contains = await ok(
+      rules.$post({ json: { categoryId: groceries.id, match: "contains", pattern: " CAFE " } }),
+    );
+    expect(contains).toMatchObject({ pattern: "cafe", position: 1 });
+    expect(
+      (await rules.$post({ json: { categoryId: groceries.id, match: "contains", pattern: "Cafe" } })).status,
+    ).toBe(409);
+    expect(
+      (await rules.$post({ json: { categoryId: groceries.id, match: "merchant", pattern: "1234" } })).status,
+    ).toBe(400);
+    expect((await rules.$post({ json: { categoryId: 999, match: "contains", pattern: "x" } })).status).toBe(
+      400,
+    );
+
+    // Uncategorised spending they'd match: SHOP, and CAFE (in its description or posted one).
+    expect(await ok(rules.preview.$get({ query: { match: "contains", pattern: "springfield" } }))).toEqual({
+      count: 3,
+    });
+    expect(
+      await ok(rules.preview.$get({ query: { match: "merchant", pattern: "CAFE SPRINGFIELD USA" } })),
+    ).toEqual({
+      count: 1,
+    });
+
+    expect((await rules.order.$put({ json: { ids: [contains.id] } })).status).toBe(400);
+    expect((await rules.order.$put({ json: { ids: [contains.id, merchant.id] } })).status).toBe(204);
+    expect((await ok(rules.$get())).map((r) => r.id)).toEqual([contains.id, merchant.id]);
+
+    await createUser(s.db, "other", await hashPassword(PASSWORD));
+    const other = client(s.app);
+    await other.api.auth.login.$post({ json: { username: "other", password: PASSWORD } });
+    expect(await ok(other.api.categories.rules.$get())).toEqual([]);
+    expect(
+      (
+        await other.api.categories.rules[":ruleId"].$delete({
+          param: { ruleId: String(merchant.id) },
+          query: {},
+        })
+      ).status,
+    ).toBe(404);
+  });
+
+  test("categorise a sync's new spending only, the first match winning, and never what's categorised", async () => {
+    const s = await synced();
+    const food = await ok(s.api.categories.$post({ json: { name: "Food" } }));
+    const fun = await ok(s.api.categories.$post({ json: { name: "Fun" } }));
+    const rules = rulesApi(s);
+    await ok(
+      rules.$post({ json: { categoryId: food.id, match: "merchant", pattern: "SHOP SPRINGFIELD USA" } }),
+    );
+    await ok(rules.$post({ json: { categoryId: fun.id, match: "contains", pattern: "shop" } }));
+
+    s.twofiat.state.transactions.push(
+      authorization({
+        card: CARD_A,
+        at: "2026-10-19T08:00:00.000Z",
+        amount: "-3.00",
+        description: "SHOP SPRINGFIELD USA",
+      }),
+      authorization({
+        card: CARD_B,
+        at: "2026-10-19T09:00:00.000Z",
+        amount: "-4.00",
+        description: "GIFT SHOP SHELBYVILLE USA",
+      }),
+    );
+    await s.runner.sync(s.accountId, "manual");
+    const items = await purchases(s);
+    const category = (description: string, at?: string) =>
+      items.find((a) => a.description === description && (at === undefined || a.occurredAt === at));
+    // The new SHOP matches both: the merchant rule comes first. The new GIFT SHOP only contains "shop".
+    expect(category("SHOP SPRINGFIELD USA", "2026-10-19T08:00:00.000Z")).toMatchObject({
+      categoryId: food.id,
+    });
+    expect(category("GIFT SHOP SHELBYVILLE USA")).toMatchObject({ categoryId: fun.id });
+    expect(category("SHOP SPRINGFIELD USA", "2026-10-19T08:00:00.000Z")?.categoryRuleId).not.toBeNull();
+    // The SHOP from the first sync was there before the rules: left alone.
+    const old = items.find(
+      (a) => a.description === "SHOP SPRINGFIELD USA" && a.occurredAt !== "2026-10-19T08:00:00.000Z",
+    );
+    expect(old).toMatchObject({ categoryId: null, categoryRuleId: null });
+
+    // A manual change takes the activity off the rule.
+    const tagged = category("GIFT SHOP SHELBYVILLE USA") as (typeof items)[number];
+    const changed = await ok(
+      s.account.activities[":activityId"].annotation.$patch({
+        param: { ...s.param, activityId: String(tagged.id) },
+        json: { categoryId: food.id },
+      }),
+    );
+    expect(changed).toMatchObject({ categoryId: food.id, categoryRuleId: null });
+  });
+
+  test("apply to existing spending on request, and on change or deletion keep, move or clear what they set", async () => {
+    const s = await synced();
+    const food = await ok(s.api.categories.$post({ json: { name: "Food" } }));
+    const treats = await ok(s.api.categories.$post({ json: { name: "Treats" } }));
+    const rules = rulesApi(s);
+    const rule = await ok(
+      rules.$post({ json: { categoryId: food.id, match: "contains", pattern: "springfield" } }),
+    );
+    const one = rules[":ruleId"];
+    const param = { param: { ruleId: String(rule.id) } };
+
+    // The kiosk was categorised by hand first, so the rule leaves it.
+    const kiosk = (await purchases(s)).find((a) => a.description === "KIOSK SPRINGFIELD USA");
+    if (!kiosk) throw new Error("no kiosk purchase");
+    await ok(
+      s.account.activities[":activityId"].annotation.$patch({
+        param: { ...s.param, activityId: String(kiosk.id) },
+        json: { categoryId: treats.id },
+      }),
+    );
+    expect(await ok(one.matches.$get(param))).toEqual({ count: 2 });
+    expect(await ok(one.apply.$post(param))).toEqual({ count: 2 });
+    expect(await ok(one.matches.$get(param))).toEqual({ count: 0 });
+    expect((await ok(rules.$get()))[0]?.activityCount).toBe(2);
+    expect((await purchases(s)).find((a) => a.id === kiosk.id)?.categoryId).toBe(treats.id);
+
+    // Moving: what it set follows it to the new category.
+    await ok(one.$patch({ ...param, json: { categoryId: treats.id, move: true } }));
+    expect((await purchases(s)).filter((a) => a.categoryRuleId === rule.id).map((a) => a.categoryId)).toEqual(
+      [treats.id, treats.id],
+    );
+    // Not moving: they keep their category, no longer as the rule's.
+    await ok(one.$patch({ ...param, json: { categoryId: food.id } }));
+    expect((await purchases(s)).filter((a) => a.categoryRuleId === rule.id)).toEqual([]);
+    expect((await purchases(s)).filter((a) => a.categoryId === treats.id)).toHaveLength(3);
+
+    // Deleting with clear: what it set goes back to uncategorised; what the user set stays.
+    const shop = (await purchases(s)).find((a) => a.description === "SHOP SPRINGFIELD USA");
+    if (!shop) throw new Error("no shop purchase");
+    await ok(
+      s.account.activities[":activityId"].annotation.$patch({
+        param: { ...s.param, activityId: String(shop.id) },
+        json: { categoryId: null, note: "weekly" },
+      }),
+    );
+    expect(await ok(one.apply.$post(param))).toEqual({ count: 1 });
+    expect((await one.$delete({ ...param, query: { clear: "true" } })).status).toBe(204);
+    const cleared = await purchases(s);
+    expect(cleared.find((a) => a.id === shop.id)).toMatchObject({ categoryId: null, note: "weekly" });
+    expect(cleared.filter((a) => a.categoryId === treats.id)).toHaveLength(2);
+    // Without clear, what it set stays, untagged.
+    const again = await ok(
+      rules.$post({ json: { categoryId: food.id, match: "merchant", pattern: "SHOP SPRINGFIELD USA" } }),
+    );
+    const againParam = { param: { ruleId: String(again.id) } };
+    expect(await ok(rules[":ruleId"].apply.$post(againParam))).toEqual({ count: 1 });
+    expect((await rules[":ruleId"].$delete({ ...againParam, query: {} })).status).toBe(204);
+    expect((await purchases(s)).find((a) => a.id === shop.id)).toMatchObject({
+      categoryId: food.id,
+      categoryRuleId: null,
+    });
+  });
+  test("go with their category: deleting it deletes them, and what they set becomes uncategorised", async () => {
+    const s = await synced();
+    const food = await ok(s.api.categories.$post({ json: { name: "Food" } }));
+    const fun = await ok(s.api.categories.$post({ json: { name: "Fun" } }));
+    const rules = rulesApi(s);
+    const shop = await ok(rules.$post({ json: { categoryId: food.id, match: "contains", pattern: "shop" } }));
+    await ok(rules.$post({ json: { categoryId: food.id, match: "contains", pattern: "cafe" } }));
+    const kiosk = await ok(
+      rules.$post({ json: { categoryId: fun.id, match: "contains", pattern: "kiosk" } }),
+    );
+    await ok(rules[":ruleId"].apply.$post({ param: { ruleId: String(shop.id) } }));
+    expect((await ok(s.api.categories.$get())).map((c) => [c.name, c.activityCount, c.ruleCount])).toEqual([
+      ["Food", 1, 2],
+      ["Fun", 0, 1],
+    ]);
+
+    expect(
+      (await s.api.categories[":categoryId"].$delete({ param: { categoryId: String(food.id) } })).status,
+    ).toBe(204);
+    expect((await ok(rules.$get())).map((r) => r.id)).toEqual([kiosk.id]);
+    const set = (await purchases(s)).filter((a) => a.categoryId !== null || a.categoryRuleId !== null);
+    expect(set).toEqual([]);
+    expect(s.db.select().from(activityAnnotations).all()).toEqual([]);
   });
 });
 
