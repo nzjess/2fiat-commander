@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { activityRows, dailyRows, type HistoryPoint, rangeStart } from "../src/lib/balance.ts";
+import { activityRows, dailyRows, type HistoryPoint, rangeStart, timeTicks } from "../src/lib/balance.ts";
 
 // Local times, so days split where the user's do.
 const at = (day: number, hour: number) => new Date(2026, 9, day, hour).toISOString();
@@ -63,4 +63,67 @@ test("ranges count back from now", () => {
   expect(rangeStart("7d", now)).toBe(now - 7 * 86_400_000);
   expect(rangeStart("30d", now)).toBe(now - 30 * 86_400_000);
   expect(rangeStart("all", now)).toBeUndefined();
+});
+
+describe("time axis ticks", () => {
+  const local = (y: number, m: number, d: number, h = 0) => new Date(y, m - 1, d, h).getTime();
+  const ticks = (from: number, to: number) =>
+    timeTicks(from, to).ticks.map((t) => new Date(t).toDateString());
+
+  test("a week: every midnight inside the span", () => {
+    expect(ticks(local(2026, 10, 20, 12), local(2026, 10, 27, 12))).toEqual(
+      [21, 22, 23, 24, 25, 26, 27].map((d) => new Date(2026, 9, d).toDateString()),
+    );
+  });
+
+  test("a month: every Monday", () => {
+    // 27 Sept 2026 is a Sunday.
+    expect(ticks(local(2026, 9, 27, 12), local(2026, 10, 27, 12))).toEqual(
+      [28, 35, 42, 49, 56].map((d) => new Date(2026, 8, d).toDateString()),
+    );
+  });
+
+  test("90 days: the 1st and 15th", () => {
+    expect(ticks(local(2026, 7, 29, 12), local(2026, 10, 27, 12))).toEqual(
+      [
+        [8, 1],
+        [8, 15],
+        [9, 1],
+        [9, 15],
+        [10, 1],
+        [10, 15],
+      ].map(([m, d]) => new Date(2026, (m as number) - 1, d).toDateString()),
+    );
+  });
+
+  test("a year: each month, labelled with its year", () => {
+    const axis = timeTicks(local(2025, 10, 27, 12), local(2026, 10, 27, 12));
+    expect(axis.ticks).toHaveLength(12);
+    expect(new Date(axis.ticks[0] as number).toDateString()).toBe(new Date(2025, 10, 1).toDateString());
+    expect(axis.format(axis.ticks[0] as number)).toMatch(/2025/);
+  });
+
+  test("two years: quarters; longer: years", () => {
+    const quarters = timeTicks(local(2024, 10, 27), local(2026, 10, 27)).ticks.map((t) =>
+      new Date(t).getMonth(),
+    );
+    expect(new Set(quarters)).toEqual(new Set([0, 3, 6, 9]));
+    const years = timeTicks(local(2021, 6, 1), local(2026, 10, 27));
+    expect(years.ticks.map((t) => new Date(t).getFullYear())).toEqual([2022, 2023, 2024, 2025, 2026]);
+    expect(years.format(years.ticks[0] as number)).toBe("2022");
+  });
+
+  test("ticks stay on midnight across a daylight saving change", () => {
+    const tz = process.env.TZ;
+    process.env.TZ = "Europe/London"; // Clocks went back on 25 Oct 2026.
+    try {
+      const axis = timeTicks(local(2026, 10, 22, 12), local(2026, 10, 28, 12));
+      expect(axis.ticks.map((t) => [new Date(t).getDate(), new Date(t).getHours()])).toEqual(
+        [23, 24, 25, 26, 27, 28].map((d) => [d, 0]),
+      );
+    } finally {
+      if (tz === undefined) delete process.env.TZ;
+      else process.env.TZ = tz;
+    }
+  });
 });

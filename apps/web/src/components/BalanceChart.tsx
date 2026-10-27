@@ -2,7 +2,15 @@ import { LineChart } from "@mantine/charts";
 import { Group, Paper, SegmentedControl, Stack, Text } from "@mantine/core";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { activityRows, type ChartRow, dailyRows, RANGES, type Range, rangeStart } from "../lib/balance.ts";
+import {
+  activityRows,
+  type ChartRow,
+  dailyRows,
+  RANGES,
+  type Range,
+  rangeStart,
+  timeTicks,
+} from "../lib/balance.ts";
 import { balanceHistoryQuery } from "../queries.ts";
 import { useMoney } from "./Money.tsx";
 
@@ -41,6 +49,11 @@ export function BalanceChart({ accountId, logicalCardId }: { accountId: string; 
   const from = rangeStart(range, now);
   const rows =
     mode === "activity" ? activityRows(points, reported, from, now) : dailyRows(points, reported, from, now);
+  // The whole range, as the spending chart shows it, even before the card's first activity. A day's row sits at
+  // its midnight, so the first can start a little before the range does.
+  const first = rows[0]?.t ?? now;
+  const start = from === undefined ? first : Math.min(from, first);
+  const axis = timeTicks(start, now);
 
   return (
     <Stack gap="xs">
@@ -78,13 +91,13 @@ export function BalanceChart({ accountId, logicalCardId }: { accountId: string; 
             ? { strokeWidth: 0, dot: { r: 3, strokeWidth: 0 }, activeDot: { r: 4 } }
             : { dot: false }
         }
+        // Our own ticks: left to choose, Recharts puts one at every row, and their labels smear together.
         xAxisProps={{
           type: "number",
-          scale: "time",
-          minTickGap: 40,
-          domain: ["dataMin", "dataMax"],
-          tickFormatter: (t: number) =>
-            new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short" }),
+          minTickGap: 20,
+          domain: [start, now],
+          ticks: axis.ticks,
+          tickFormatter: axis.format,
         }}
         valueFormatter={(cents) => money.format(cents)}
         tooltipProps={{

@@ -121,6 +121,45 @@ export function dailyRows(
   return rows;
 }
 
+export interface TimeTicks {
+  ticks: number[];
+  format: (t: number) => string;
+}
+
+const DAY = 86_400_000;
+const local = (y: number, m: number, d: number) => new Date(y, m, d).getTime();
+
+/**
+ * Ticks for a time axis from `from` to `to`, at local calendar boundaries spaced for the span: days, Mondays, the
+ * 1st and 15th, months, quarters or years. Built from calendar fields, so a daylight saving change doesn't drift
+ * them off midnight.
+ */
+export function timeTicks(from: number, to: number): TimeTicks {
+  const days = (to - from) / DAY;
+  const start = new Date(from);
+  const [y, m, d] = [start.getFullYear(), start.getMonth(), start.getDate()];
+  const candidates: number[] = [];
+  let format: (t: number) => string;
+  if (days <= 45) {
+    // Every day, or every Monday.
+    const step = days <= 10 ? 1 : 7;
+    const offset = step === 1 ? 0 : (8 - start.getDay()) % 7;
+    for (let i = offset; local(y, m, d + i) <= to; i += step) candidates.push(local(y, m, d + i));
+    format = (t) => new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  } else if (days <= 120) {
+    for (let i = 0; local(y, m + i, 1) <= to; i++) candidates.push(local(y, m + i, 1), local(y, m + i, 15));
+    format = (t) => new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  } else if (days <= 1100) {
+    const step = days <= 400 ? 1 : 3;
+    for (let i = -(m % step); local(y, m + i, 1) <= to; i += step) candidates.push(local(y, m + i, 1));
+    format = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", year: "numeric" });
+  } else {
+    for (let i = 0; local(y + i, 0, 1) <= to; i++) candidates.push(local(y + i, 0, 1));
+    format = (t) => String(new Date(t).getFullYear());
+  }
+  return { ticks: candidates.filter((t) => t >= from && t <= to), format };
+}
+
 export const RANGES = [
   { value: "7d", label: "7 days", days: 7 },
   { value: "30d", label: "30 days", days: 30 },
