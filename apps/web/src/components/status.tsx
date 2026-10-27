@@ -47,10 +47,14 @@ export function GapBadge({ cents }: { cents: number }) {
   );
 }
 
-/** Marks a balance that moved during its sync, so its gap may not be real. */
+/** Marks a balance that moved during its sync, so its gap may not be real, and isn't turned into a finding. */
 export function TransientBadge() {
   return (
-    <Tooltip label="The balance changed while syncing, so this gap may be a timing artefact">
+    <Tooltip
+      label="The balance changed while syncing, so this gap may be a timing artefact. Its finding waits for a sync that sees the balance settled."
+      multiline
+      w={280}
+    >
       <Badge color="yellow" variant="light">
         Moving
       </Badge>

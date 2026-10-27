@@ -34,11 +34,13 @@ export interface RecordFindingsResult {
   resolved: number;
 }
 
-type Reconciliations = Pick<CardReconciliation, "cardId" | "findings">[];
+/** A card's findings, and the kinds this evaluation couldn't judge, whose findings stay exactly as they were. */
+type Reconciliations = (Pick<CardReconciliation, "cardId" | "findings"> & { held?: FindingKind[] })[];
 
 /**
  * Records one evaluation's findings for the given cards. A finding seen before is updated in place; an open one
- * that this evaluation no longer sees is marked resolved by it. Cards not passed are left alone.
+ * that this evaluation no longer sees is marked resolved by it, unless its kind is held. Cards not passed are left
+ * alone.
  */
 export function recordFindings(
   db: Db,
@@ -115,12 +117,12 @@ export function recordFindingsIn(
     }
 
     const open = q
-      .select({ id: findings.id, fingerprint: findings.fingerprint })
+      .select({ id: findings.id, kind: findings.kind, fingerprint: findings.fingerprint })
       .from(findings)
       .where(and(eq(findings.cardId, cardId), isNull(findings.resolvedEvaluationId)))
       .all();
     for (const f of open) {
-      if (seen.has(f.fingerprint)) continue;
+      if (seen.has(f.fingerprint) || rec.held?.includes(f.kind)) continue;
       q.update(findings).set({ resolvedEvaluationId: evaluationId }).where(eq(findings.id, f.id)).run();
       result.resolved++;
     }

@@ -1,5 +1,5 @@
 import { authorization, CARD_A, CARD_B, card, order, posting } from "@twofiat/client/fixtures";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { describe, expect, test, vi } from "vitest";
 import { createAccount } from "../src/accounts.ts";
 import { openDb } from "../src/db/db.ts";
@@ -9,6 +9,7 @@ import {
   balanceObservations,
   balanceSnapshots,
   cards,
+  findings,
   logicalCards,
   openingBalances,
   rawOrders,
@@ -285,6 +286,40 @@ describe("SyncRunner", () => {
     s.twofiat.state.cards[1] = card({ id: CARD_B, balance: 95 });
     const next = await s.runner.sync(s.accountId, "manual");
     expect(next.evaluation?.inferredOpenings).toBe(1);
+  });
+
+  test("leaves a card's balance-gap finding as it was while its balance is transient", async () => {
+    const s = setup();
+    const gaps = () =>
+      s.db
+        .select({ cents: findings.cents, resolved: findings.resolvedEvaluationId })
+        .from(findings)
+        .where(and(eq(findings.cardId, s.cardId(CARD_A)), eq(findings.kind, "balance-gap")))
+        .all();
+    await s.runner.sync(s.accountId, "manual");
+    expect(gaps()).toEqual([]);
+
+    // A balance that moves mid-sync opens no gap, though the ledger doesn't explain it.
+    s.twofiat.state.balancesAfterRows = { [CARD_A]: 20 };
+    await s.runner.sync(s.accountId, "manual");
+    expect(gaps()).toEqual([]);
+
+    // Settled, the gap opens.
+    s.twofiat.state.balancesAfterRows = undefined;
+    s.twofiat.state.cards[0] = card({ id: CARD_A, balance: 20 });
+    await s.runner.sync(s.accountId, "manual");
+    expect(gaps()).toEqual([{ cents: 550, resolved: null }]);
+
+    // Moving back mid-sync neither resolves it nor changes its amount.
+    s.twofiat.state.balancesAfterRows = { [CARD_A]: 14.5 };
+    await s.runner.sync(s.accountId, "manual");
+    expect(gaps()).toEqual([{ cents: 550, resolved: null }]);
+
+    // Settled back, it resolves.
+    s.twofiat.state.balancesAfterRows = undefined;
+    s.twofiat.state.cards[0] = card({ id: CARD_A, balance: 14.5 });
+    await s.runner.sync(s.accountId, "manual");
+    expect(gaps()).toEqual([{ cents: 550, resolved: expect.any(Number) }]);
   });
 
   test("leaves cards 2fiat no longer lists out of the evaluation", async () => {

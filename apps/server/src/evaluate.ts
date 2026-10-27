@@ -40,7 +40,9 @@ export interface EvaluateResult {
  * evaluation: balance snapshots and findings. Cards the latest sync didn't see (e.g. cancelled ones) are left out.
  *
  * A card with no history from its issue and no opening balance gets one inferred as its current gap, so later
- * gaps measure drift from here. Not while its balance is transient, since that gap may be an artefact.
+ * gaps measure drift from here. Not while its balance is transient, since that gap may be an artefact: for the
+ * same reason, its balance-gap finding is then left as it was (not opened, changed or resolved) until a sync sees
+ * the balance settled. Its other findings come from the rows alone, so are recorded as usual.
  *
  * Refuses to run on a ledger with raw rows not normalised yet. Returns undefined before the first sync.
  */
@@ -104,7 +106,16 @@ export function evaluate(
         })
         .run();
     }
-    const reconciled = recordFindingsIn(q, accountId, evaluationId, reconciliations);
+    const reconciled = recordFindingsIn(
+      q,
+      accountId,
+      evaluationId,
+      reconciliations.map((rec) =>
+        byTwofiatId.get(rec.cardId)?.observation.transient
+          ? { ...rec, findings: rec.findings.filter((f) => f.kind !== "balance-gap"), held: ["balance-gap"] }
+          : rec,
+      ),
+    );
     const missing = recordMissingCardsIn(q, accountId, evaluationId);
     const findings = {
       opened: reconciled.opened + missing.opened,
