@@ -114,8 +114,18 @@ export function lastFour(maskedNumber: string): string {
 export const cardLabel = (card: Pick<Card, "alias" | "maskedNumber">) =>
   `${card.alias} ·· ${lastFour(card.maskedNumber)}`;
 
-/** 2fiat reports status "1" for an active card; other values are shown as they are. */
+/** 2fiat reports status "1" for an active card. */
 export const isActive = (card: Pick<Card, "status">) => card.status === null || card.status === "1";
+
+/**
+ * What to call an inactive card's status. An assumption: 2fiat doesn't document its statuses, and "2" is taken to
+ * mean inactive only because the expired and replaced cards we've seen have it. Other values, whose meaning is
+ * unknown, show as they are.
+ */
+export function cardStatusLabel(card: Pick<Card, "status">): string | undefined {
+  if (isActive(card)) return undefined;
+  return card.status === "2" ? "Inactive" : `Status ${card.status}`;
+}
 
 /** An ISO date as e.g. "Aug 2027", for expiry dates. */
 export function formatMonth(iso: string | null, locale?: string): string {

@@ -27,6 +27,7 @@ import { SpendingChart } from "../../../../../components/SpendingChart.tsx";
 import { GapBadge, MissingBadge, OpeningBadge, TransientBadge } from "../../../../../components/status.tsx";
 import {
   cardLabel,
+  cardStatusLabel,
   formatDate,
   formatDateTime,
   formatMoney,
@@ -116,7 +117,7 @@ function LogicalCardPage() {
           </Group>
           <Text c="dimmed" size="sm">
             {cardLabel(current)} · {current.product} · expires {formatMonth(current.expiresAt)}
-            {!isActive(current) && ` · status ${current.status}`}
+            {!isActive(current) && ` · ${cardStatusLabel(current)?.toLowerCase()}`}
           </Text>
           {members.length > 1 && (
             <Text c="dimmed" size="sm">
@@ -396,7 +397,7 @@ function PhysicalCards({
                   {card.missingSince && <MissingBadge since={card.missingSince} />}
                   {!isActive(card) && (
                     <Badge size="xs" color="gray">
-                      Status {card.status}
+                      {cardStatusLabel(card)}
                     </Badge>
                   )}
                 </Group>

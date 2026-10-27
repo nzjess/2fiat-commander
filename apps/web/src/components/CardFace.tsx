@@ -1,6 +1,6 @@
 import { Box, Group, Stack, Text } from "@mantine/core";
 import type { Card } from "../api.ts";
-import { isActive } from "../lib/format.ts";
+import { cardStatusLabel, isActive } from "../lib/format.ts";
 import { CardChip } from "./CardChip.tsx";
 import { Amount } from "./Money.tsx";
 
@@ -101,7 +101,7 @@ export function CardFace({
         <Group justify="space-between" align="flex-end" wrap="nowrap">
           <Stack gap={0}>
             <Text fz={9} tt="uppercase" opacity={0.7}>
-              {inactive ? `Status ${card.status}` : "Valid thru"}
+              {cardStatusLabel(card) ?? "Valid thru"}
             </Text>
             <Text ff="monospace" fz="sm">
               {expiryLabel(card.expiresAt)}

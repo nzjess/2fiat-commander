@@ -3,6 +3,7 @@ import { ApiError, apiError, isUnauthenticated } from "../src/api.ts";
 import { cardNetwork, expiryLabel } from "../src/components/CardFace.tsx";
 import {
   cardLabel,
+  cardStatusLabel,
   formatMoney,
   formatRate,
   isoToLocalDate,
@@ -67,6 +68,13 @@ describe("rates", () => {
 describe("cards", () => {
   test("labels a card by alias and last four digits", () => {
     expect(cardLabel({ alias: "Everyday", maskedNumber: "5257 **** **** 1234" })).toBe("Everyday ·· 1234");
+  });
+
+  test("names an inactive card's status: 2 as inactive (assumed), others as they are", () => {
+    expect(cardStatusLabel({ status: "1" })).toBeUndefined();
+    expect(cardStatusLabel({ status: null })).toBeUndefined();
+    expect(cardStatusLabel({ status: "2" })).toBe("Inactive");
+    expect(cardStatusLabel({ status: "3" })).toBe("Status 3");
   });
 
   test("reads the network and expiry", () => {
