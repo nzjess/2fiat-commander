@@ -4,7 +4,7 @@ import { LOOKBACK_DAYS } from "@twofiat/client";
 import { z } from "zod";
 
 /** Relative paths in the config resolve against the repo root, wherever the process was started from. */
-const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
+export const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 
 const Env = z.object({
   /** 32+ random bytes, base64: the key material for encryption at rest. */
@@ -15,6 +15,12 @@ const Env = z.object({
   SYNC_OVERLAP_DAYS: z.coerce.number().int().nonnegative().default(LOOKBACK_DAYS),
   /** How often each account syncs on its own, in minutes. 0 (the default) leaves syncing to the user. */
   SYNC_INTERVAL_MINUTES: z.coerce.number().int().nonnegative().default(0),
+  /** The built web app (`apps/web/dist`) to serve beside the API. Unset in dev, where Vite serves it. */
+  WEB_DIST: z.string().optional(),
+  /** Where the daily backups go. Unset (the default) takes none. */
+  BACKUP_DIR: z.string().optional(),
+  /** How many daily backups to keep. */
+  BACKUP_KEEP: z.coerce.number().int().positive().default(14),
 });
 
 export interface Config {
@@ -24,12 +30,16 @@ export interface Config {
   port: number;
   syncOverlapDays: number;
   syncIntervalMinutes: number;
+  webDist: string | undefined;
+  backupDir: string | undefined;
+  backupKeep: number;
 }
+
+const fromRepoRoot = (path: string) => (isAbsolute(path) ? path : resolve(REPO_ROOT, path));
 
 /** The database path alone, for tools that don't need the rest of the config (e.g. the user CLI). */
 export function databasePath(env: Record<string, string | undefined> = process.env): string {
-  const path = env.DATABASE_PATH || "data/commander.db";
-  return isAbsolute(path) ? path : resolve(REPO_ROOT, path);
+  return fromRepoRoot(env.DATABASE_PATH || "data/commander.db");
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -47,5 +57,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     port: e.PORT,
     syncOverlapDays: e.SYNC_OVERLAP_DAYS,
     syncIntervalMinutes: e.SYNC_INTERVAL_MINUTES,
+    webDist: e.WEB_DIST ? fromRepoRoot(e.WEB_DIST) : undefined,
+    backupDir: e.BACKUP_DIR ? fromRepoRoot(e.BACKUP_DIR) : undefined,
+    backupKeep: e.BACKUP_KEEP,
   };
 }

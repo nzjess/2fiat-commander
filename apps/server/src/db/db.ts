@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import Database, { type RunResult } from "better-sqlite3";
 import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
@@ -8,7 +9,8 @@ export type Db = BetterSQLite3Database<typeof schema>;
 /** The database or a transaction on it. */
 export type Executor = BaseSQLiteDatabase<"sync", RunResult, typeof schema>;
 
-const MIGRATIONS = new URL("../../drizzle", import.meta.url).pathname;
+// Not `.pathname`, which keeps a path's spaces percent-encoded (e.g. a checkout in "~/Applications/2fiat Commander").
+const MIGRATIONS = fileURLToPath(new URL("../../drizzle", import.meta.url));
 
 /** Opens (or creates) the database and applies any pending migrations. Pass ":memory:" for tests. */
 export function openDb(path: string): Db {

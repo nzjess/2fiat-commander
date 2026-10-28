@@ -13,7 +13,8 @@
     "capture": "node --env-file=.env packages/twofiat-client/scripts/capture.ts",
     "report": "node packages/twofiat-client/scripts/report.ts",
     "user:add": "node --env-file-if-exists=.env apps/server/scripts/user.ts add",
-    "user:passwd": "node --env-file-if-exists=.env apps/server/scripts/user.ts passwd"
+    "user:passwd": "node --env-file-if-exists=.env apps/server/scripts/user.ts passwd",
+    "app": "node apps/server/scripts/app.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.3",

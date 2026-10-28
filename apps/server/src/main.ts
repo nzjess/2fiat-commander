@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.ts";
+import { Backups } from "./backup.ts";
 import { loadConfig } from "./config.ts";
 import { openDb } from "./db/db.ts";
 import { FxMirror } from "./fx.ts";
@@ -9,6 +10,7 @@ import { rebuildOutdated } from "./reevaluate.ts";
 import { Scheduler } from "./scheduler.ts";
 import { Secrets } from "./secrets.ts";
 import { SyncRunner } from "./sync.ts";
+import { withWeb } from "./web.ts";
 
 const config = loadConfig();
 mkdirSync(dirname(config.databasePath), { recursive: true });
@@ -32,9 +34,14 @@ if (config.syncIntervalMinutes > 0) {
 
 new FxMirror({ db }).start();
 
-serve(
-  { fetch: createApp({ db, secrets, runner }).fetch, hostname: config.host, port: config.port },
-  (info) => {
-    console.log(`server listening on http://${config.host}:${info.port}`);
-  },
-);
+if (config.backupDir) {
+  new Backups({ db, dir: config.backupDir, keep: config.backupKeep }).start();
+  console.log(`backing up daily to ${config.backupDir}`);
+}
+
+const api = createApp({ db, secrets, runner });
+const app = config.webDist ? withWeb(api, config.webDist) : api;
+
+serve({ fetch: app.fetch, hostname: config.host, port: config.port }, (info) => {
+  console.log(`server listening on http://${config.host}:${info.port}`);
+});
