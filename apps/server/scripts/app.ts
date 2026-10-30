@@ -63,13 +63,28 @@ function ensureSecret(): void {
 
 const launchctl = (...args: string[]) => spawnSync("launchctl", args, { encoding: "utf8" });
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Stops the agent, if it's loaded. `bootout` returns before launchd lets go of it, and bootstrapping it again before
+ * then fails ("Bootstrap failed: 5: Input/output error"), so this waits until it's gone.
+ */
+async function bootout(): Promise<void> {
+  if (launchctl("bootout", `${target}/${LABEL}`).status !== 0) return;
+  const deadline = Date.now() + 15_000;
+  while (launchctl("print", `${target}/${LABEL}`).status === 0) {
+    if (Date.now() > deadline) throw new Error("the agent didn't stop within 15 seconds");
+    await sleep(100);
+  }
+}
+
 async function healthy(timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
       if ((await fetch(`${url()}/api/health`)).ok) return true;
     } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await sleep(250);
   }
   return false;
 }
@@ -87,7 +102,7 @@ async function install(): Promise<void> {
     paths.plist,
     launchdPlist({ node: process.execPath, script: SCRIPT, repoRoot: REPO_ROOT, log: paths.log }),
   );
-  launchctl("bootout", `${target}/${LABEL}`);
+  await bootout();
   const boot = launchctl("bootstrap", target, paths.plist);
   if (boot.status !== 0) throw new Error(`launchctl bootstrap failed: ${boot.stderr.trim()}`);
   if (!(await healthy(15_000))) {
@@ -115,9 +130,9 @@ function installedCheckout(): string | undefined {
   return program ? join(dirname(program), "..", "..", "..") : undefined;
 }
 
-function uninstall(): void {
+async function uninstall(): Promise<void> {
   const checkout = installedCheckout();
-  launchctl("bootout", `${target}/${LABEL}`);
+  await bootout();
   const removed = [
     paths.plist,
     dirname(paths.log),
@@ -181,7 +196,7 @@ switch (command) {
     break;
   }
   case "uninstall":
-    uninstall();
+    await uninstall();
     break;
   case "status":
     await status();
