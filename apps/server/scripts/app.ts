@@ -18,7 +18,8 @@ import {
 } from "../src/installed.ts";
 
 // The installed app on this Mac (see src/installed.ts):
-//   pnpm app install|update     build the web app, then (re)start the launchd agent from this checkout
+//   pnpm app install|update     install the dependencies, build the web app, then (re)start the launchd agent from
+//                               this checkout (after a git pull, update is all it takes)
 //   pnpm app restart            restart the agent
 //   pnpm app uninstall          remove all the install made but the data (the database, backups, config.env)
 //                               and the Keychain secret, which the data can't be read without
@@ -91,6 +92,8 @@ async function healthy(timeoutMs: number): Promise<boolean> {
 
 async function install(): Promise<void> {
   if (process.platform !== "darwin") throw new Error("the installed app runs on macOS only");
+  // As the lockfile says, so a pull that changed the dependencies needs no separate `pnpm install`.
+  execFileSync("pnpm", ["install", "--frozen-lockfile"], { cwd: REPO_ROOT, stdio: "inherit" });
   execFileSync("pnpm", ["--filter", "@twofiat/web", "build"], { cwd: REPO_ROOT, stdio: "inherit" });
   ensureSecret();
   mkdirSync(paths.backups, { recursive: true });
