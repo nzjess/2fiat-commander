@@ -2,14 +2,11 @@ import { Alert, Stack } from "@mantine/core";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { AnchorLink, useUrlCard } from "../../../components/links.tsx";
-import { setLastAccount, setLastCard } from "../../../lib/storage.ts";
+import { AnchorLink } from "../../../components/links.tsx";
+import { setLastAccount } from "../../../lib/storage.ts";
 import { accountQuery } from "../../../queries.ts";
 
-/**
- * One account's pages. Remembers the account for next time, and the card last chosen in it (a card page, or a
- * page's `card`), so the other pages stay on that card. Marks an archived account.
- */
+/** One account's pages. Remembers the account for next time, and marks an archived account. */
 export const Route = createFileRoute("/_app/a/$accountId")({
   loader: ({ context, params }) => context.queryClient.ensureQueryData(accountQuery(params.accountId)),
   component: AccountLayout,
@@ -19,10 +16,6 @@ function AccountLayout() {
   const { accountId } = Route.useParams();
   const { data: account } = useSuspenseQuery(accountQuery(accountId));
   useEffect(() => setLastAccount(accountId), [accountId]);
-  const card = useUrlCard();
-  useEffect(() => {
-    if (card !== undefined) setLastCard(accountId, card);
-  }, [accountId, card]);
 
   return (
     <Stack>

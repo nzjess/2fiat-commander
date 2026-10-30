@@ -10,8 +10,6 @@ export type FindingStatus = (typeof FINDING_STATUSES)[number];
 export interface FindingsSearch {
   /** Absent means open. */
   status?: FindingStatus;
-  /** A logical card. */
-  card?: number;
   kind?: string;
 }
 
@@ -23,23 +21,11 @@ export function positiveInt(value: unknown): number | undefined {
 
 export function parseFindingsSearch(raw: Record<string, unknown>): FindingsSearch {
   const status = FINDING_STATUSES.find((s) => s === raw.status && s !== "open");
-  const card = positiveInt(raw.card);
   const kind = typeof raw.kind === "string" && /^[a-z-]+$/.test(raw.kind) ? raw.kind : undefined;
   return {
     ...(status && { status }),
-    ...(card !== undefined && { card }),
     ...(kind !== undefined && { kind }),
   };
-}
-
-export interface InsightsSearch {
-  /** A logical card; absent means the first. */
-  card?: number;
-}
-
-export function parseInsightsSearch(raw: Record<string, unknown>): InsightsSearch {
-  const card = positiveInt(raw.card);
-  return card === undefined ? {} : { card };
 }
 
 export const PAGE_SIZES = [10, 20, 50, 100] as const;
@@ -48,8 +34,6 @@ export type PageSize = (typeof PAGE_SIZES)[number];
 export const DEFAULT_PAGE_SIZE: PageSize = 10;
 
 export interface ActivitySearch {
-  /** A logical card; absent means the first. */
-  card?: number;
   /** Activity kinds, comma-separated, as the server takes them. */
   kind?: string;
   /** Activity statuses, comma-separated, any of them matching; "stale" among them (see `ACTIVITY_STATUS_FILTERS`). */
@@ -99,7 +83,6 @@ export function parseActivitySearch(raw: Record<string, unknown>): ActivitySearc
   const cursor = typeof raw.cursor === "string" && /^[\w-]{1,200}$/.test(raw.cursor) ? raw.cursor : undefined;
   const paged = page !== undefined && page > 1 && cursor !== undefined;
   const fields: ActivitySearch = {
-    card: positiveInt(raw.card),
     kind: knownList(raw.kind, Object.keys(ACTIVITY_KIND_LABELS)),
     status: knownList(raw.status, Object.keys(ACTIVITY_STATUS_FILTERS)),
     category: categoryList(raw.category),

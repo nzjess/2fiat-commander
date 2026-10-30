@@ -189,9 +189,9 @@ function Findings({
               )}
             </Group>
             <AnchorLink
-              to="/a/$accountId/findings"
-              params={{ accountId }}
-              search={{ card: logical.id, kind: f.kind, status: "all" }}
+              to="/a/$accountId/c/$logicalCardId/findings"
+              params={{ accountId, logicalCardId: String(logical.id) }}
+              search={{ kind: f.kind, status: "all" }}
               size="xs"
             >
               In findings

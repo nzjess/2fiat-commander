@@ -107,19 +107,19 @@ function LogicalCardPanel({
     <Paper withBorder p="md" radius="md">
       <Stack gap="sm">
         <Link
-          to="/a/$accountId/cards/$logicalCardId"
+          to="/a/$accountId/c/$logicalCardId"
           params={params}
           style={{ color: "inherit", textDecoration: "none" }}
         >
           <CardFace card={current} balanceCents={logical.reportedCents} />
         </Link>
         <Group gap="xs">
-          <AnchorLink to="/a/$accountId/cards/$logicalCardId" params={params} fw={700} size="lg" c="inherit">
+          <AnchorLink to="/a/$accountId/c/$logicalCardId" params={params} fw={700} size="lg" c="inherit">
             {logical.name}
           </AnchorLink>
           {current.missingSince && <MissingBadge since={current.missingSince} />}
           {findings > 0 && (
-            <AnchorLink to="/a/$accountId/findings" params={{ accountId }} search={{ card: logical.id }}>
+            <AnchorLink to="/a/$accountId/c/$logicalCardId/findings" params={params}>
               <Badge color="orange" variant="light" style={{ cursor: "pointer" }}>
                 {findings} open {findings === 1 ? "finding" : "findings"}
               </Badge>

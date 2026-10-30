@@ -10,24 +10,21 @@ import { draftFromSuggestion, type FeeScheduleDraft, FeeScheduleModal } from "./
 import { AnchorLink } from "./links.tsx";
 
 /**
- * Reconciliation findings, each with its card, when it was seen, and the user's explanation. A balance gap can be
- * closed by recording the adjustment that explains it. A finding is about one physical card, since 2fiat reports
- * balances per physical card: it shows under its logical card, naming the physical one when there are several.
+ * A logical card's reconciliation findings, each with when it was seen and the user's explanation. A balance gap
+ * can be closed by recording the adjustment that explains it. A finding is about one physical card, since 2fiat
+ * reports balances per physical card: it names the physical one when the logical card has several.
  */
 export function FindingList({
   accountId,
   findings,
   cards,
   logicalCards,
-  showCard = true,
   readOnly = false,
 }: {
   accountId: string;
   findings: Finding[];
   cards: Card[];
   logicalCards: LogicalCard[];
-  /** Name the logical card on each finding (off on a logical card's own page). */
-  showCard?: boolean;
   readOnly?: boolean;
 }) {
   if (findings.length === 0) {
@@ -48,7 +45,6 @@ export function FindingList({
           finding={f}
           card={byId.get(f.cardId)}
           logical={logicalById.get(byId.get(f.cardId)?.logicalCardId ?? 0)}
-          showCard={showCard}
           readOnly={readOnly}
         />
       ))}
@@ -61,14 +57,12 @@ function FindingItem({
   finding,
   card,
   logical,
-  showCard,
   readOnly,
 }: {
   accountId: string;
   finding: Finding;
   card: Card | undefined;
   logical: LogicalCard | undefined;
-  showCard: boolean;
   readOnly: boolean;
 }) {
   const resolved = finding.resolvedAt !== null;
@@ -117,15 +111,6 @@ function FindingItem({
                 Explained
               </Badge>
             )}
-            {showCard && logical && (
-              <AnchorLink
-                to="/a/$accountId/cards/$logicalCardId"
-                params={{ accountId, logicalCardId: String(logical.id) }}
-                size="sm"
-              >
-                {logical.name}
-              </AnchorLink>
-            )}
             {card && logical && logical.cardIds.length > 1 && (
               <Text size="xs" c="dimmed">
                 on ·· {lastFour(card.maskedNumber)}
@@ -148,9 +133,9 @@ function FindingItem({
             <>
               {" · "}
               <AnchorLink
-                to="/a/$accountId/activity"
-                params={{ accountId }}
-                search={{ card: logical.id, finding: finding.id }}
+                to="/a/$accountId/c/$logicalCardId/activity"
+                params={{ accountId, logicalCardId: String(logical.id) }}
+                search={{ finding: finding.id }}
                 size="xs"
               >
                 {finding.activityIds.length} {finding.activityIds.length === 1 ? "activity" : "activities"}

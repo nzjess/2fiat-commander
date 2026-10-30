@@ -13,18 +13,23 @@ import {
   Title,
 } from "@mantine/core";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
-import { api, type Card, type LogicalCard, ok, send } from "../../../../../api.ts";
-import { ActivityTable } from "../../../../../components/ActivityTable.tsx";
-import { AdjustmentList } from "../../../../../components/Adjustments.tsx";
-import { CardFace } from "../../../../../components/CardFace.tsx";
-import { CardSelect } from "../../../../../components/CardPageHeader.tsx";
-import { FindingList } from "../../../../../components/FindingList.tsx";
-import { AnchorLink } from "../../../../../components/links.tsx";
-import { Amount } from "../../../../../components/Money.tsx";
-import { SpendingChart } from "../../../../../components/SpendingChart.tsx";
-import { GapBadge, MissingBadge, OpeningBadge, TransientBadge } from "../../../../../components/status.tsx";
+import { api, type Card, type LogicalCard, ok, send } from "../../../../../../api.ts";
+import { ActivityTable } from "../../../../../../components/ActivityTable.tsx";
+import { AdjustmentList } from "../../../../../../components/Adjustments.tsx";
+import { CardFace } from "../../../../../../components/CardFace.tsx";
+import { CardSelect } from "../../../../../../components/CardPageHeader.tsx";
+import { FindingList } from "../../../../../../components/FindingList.tsx";
+import { AnchorLink } from "../../../../../../components/links.tsx";
+import { Amount } from "../../../../../../components/Money.tsx";
+import { SpendingChart } from "../../../../../../components/SpendingChart.tsx";
+import {
+  GapBadge,
+  MissingBadge,
+  OpeningBadge,
+  TransientBadge,
+} from "../../../../../../components/status.tsx";
 import {
   cardLabel,
   cardStatusLabel,
@@ -34,8 +39,8 @@ import {
   formatMonth,
   isActive,
   toCents,
-} from "../../../../../lib/format.ts";
-import { activitiesParams, positiveInt } from "../../../../../lib/search.ts";
+} from "../../../../../../lib/format.ts";
+import { activitiesParams } from "../../../../../../lib/search.ts";
 import {
   accountQuery,
   activitiesQuery,
@@ -45,19 +50,17 @@ import {
   categoriesQuery,
   findingsQuery,
   logicalCardsQuery,
-} from "../../../../../queries.ts";
+} from "../../../../../../queries.ts";
 
 /**
  * A logical card: the card as the user thinks of it, across renewals and replacements. Its physical cards (2fiat's
  * own) are details, at the bottom.
  */
-export const Route = createFileRoute("/_app/a/$accountId/cards/$logicalCardId")({
+export const Route = createFileRoute("/_app/a/$accountId/c/$logicalCardId/")({
   loader: async ({ context: { queryClient }, params: { accountId, logicalCardId } }) => {
-    const id = positiveInt(logicalCardId);
-    if (id === undefined) throw notFound();
-    const logicalCards = await queryClient.ensureQueryData(logicalCardsQuery(accountId));
-    if (!logicalCards.some((l) => l.id === id)) throw notFound();
+    const id = Number(logicalCardId);
     await Promise.all([
+      queryClient.ensureQueryData(logicalCardsQuery(accountId)),
       queryClient.ensureQueryData(cardsQuery(accountId)),
       queryClient.ensureQueryData(findingsQuery(accountId, { card: id })),
       queryClient.ensureQueryData(adjustmentsQuery(accountId, id)),
@@ -102,9 +105,8 @@ function LogicalCardPage() {
           logicalCards={logicalCards}
           selected={logical}
           onSelect={(other) =>
-            other !== undefined &&
             navigate({
-              to: "/a/$accountId/cards/$logicalCardId",
+              to: "/a/$accountId/c/$logicalCardId",
               params: { accountId, logicalCardId: String(other) },
             })
           }
@@ -134,7 +136,11 @@ function LogicalCardPage() {
       <Section
         title="Spending by category"
         action={
-          <AnchorLink to="/a/$accountId/insights" params={{ accountId }} search={{ card: id }} size="sm">
+          <AnchorLink
+            to="/a/$accountId/c/$logicalCardId/insights"
+            params={{ accountId, logicalCardId }}
+            size="sm"
+          >
             More insights
           </AnchorLink>
         }
@@ -145,7 +151,11 @@ function LogicalCardPage() {
       <Section
         title="Recent activity"
         action={
-          <AnchorLink to="/a/$accountId/activity" params={{ accountId }} search={{ card: id }} size="sm">
+          <AnchorLink
+            to="/a/$accountId/c/$logicalCardId/activity"
+            params={{ accountId, logicalCardId }}
+            size="sm"
+          >
             All activity
           </AnchorLink>
         }
@@ -161,9 +171,9 @@ function LogicalCardPage() {
             logical={logical}
             onOpen={(activity) =>
               navigate({
-                to: "/a/$accountId/activity",
-                params: { accountId },
-                search: { card: id, activity },
+                to: "/a/$accountId/c/$logicalCardId/activity",
+                params: { accountId, logicalCardId },
+                search: { activity },
               })
             }
           />
@@ -174,9 +184,9 @@ function LogicalCardPage() {
         title="Open findings"
         action={
           <AnchorLink
-            to="/a/$accountId/findings"
-            params={{ accountId }}
-            search={{ card: id, status: "all" }}
+            to="/a/$accountId/c/$logicalCardId/findings"
+            params={{ accountId, logicalCardId }}
+            search={{ status: "all" }}
             size="sm"
           >
             More findings
@@ -188,7 +198,6 @@ function LogicalCardPage() {
           findings={findings}
           cards={cards}
           logicalCards={logicalCards}
-          showCard={false}
           readOnly={readOnly}
         />
       </Section>

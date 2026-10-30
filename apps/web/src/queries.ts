@@ -128,7 +128,8 @@ export const adjustmentsQuery = (accountId: string, logicalCardId: number) =>
       ok(account.adjustments.$get({ param: { accountId }, query: { logicalCardId: String(logicalCardId) } })),
   });
 
-export const findingsQuery = (accountId: string, search: FindingsSearch) =>
+/** An account's findings, or with `card` a logical card's. */
+export const findingsQuery = (accountId: string, search: FindingsSearch & { card?: number }) =>
   queryOptions({
     queryKey: ["accounts", accountId, "findings", search],
     queryFn: () =>

@@ -12,7 +12,7 @@ import {
 import { api, isUnauthenticated, send } from "../api.ts";
 import { NavItem, useUrlCard } from "../components/links.tsx";
 import { SyncButton } from "../components/SyncButton.tsx";
-import { getLastAccount, getLastCard } from "../lib/storage.ts";
+import { defaultCard, getLastAccount } from "../lib/storage.ts";
 import { accountsQuery, fxQuery, logicalCardsQuery, meQuery } from "../queries.ts";
 
 /** Everything behind the login: the shell with the account switcher, sync and navigation. */
@@ -72,14 +72,26 @@ function Layout() {
   );
 }
 
+/** A card's pages besides its own, in the sidebar. */
+const CARD_PAGES = [
+  { to: "/a/$accountId/c/$logicalCardId/activity", label: "Activity" },
+  { to: "/a/$accountId/c/$logicalCardId/insights", label: "Insights" },
+  { to: "/a/$accountId/c/$logicalCardId/findings", label: "Findings" },
+] as const;
+
 function Nav({ accountId, onNavigate }: { accountId: string | undefined; onNavigate: () => void }) {
   const matchRoute = useMatchRoute();
-  // The card in view, else the last one chosen in this account: the per-card pages stay on it.
+  // The card in view (if it exists), else the last one chosen in this account, else its first: the card pages stay
+  // on it. With no cards, there are no card pages to link to.
   const { data: logicalCards } = useQuery({ ...logicalCardsQuery(accountId ?? ""), enabled: !!accountId });
   const urlCard = useUrlCard();
-  const remembered = accountId === undefined ? undefined : getLastCard(accountId);
-  const card = [urlCard, remembered].find((id) => logicalCards?.some((l) => l.id === id));
-  const search = card === undefined ? {} : { card };
+  const card =
+    accountId && logicalCards
+      ? logicalCards.some((l) => l.id === urlCard)
+        ? urlCard
+        : defaultCard(accountId, logicalCards)
+      : undefined;
+  const cardParams = accountId && card !== undefined ? { accountId, logicalCardId: String(card) } : undefined;
   return (
     <>
       {accountId && (
@@ -92,34 +104,21 @@ function Nav({ accountId, onNavigate }: { accountId: string | undefined; onNavig
             label="Overview"
             active={
               !!matchRoute({ to: "/a/$accountId", params: { accountId } }) ||
-              !!matchRoute({ to: "/a/$accountId/cards/$logicalCardId", params: { accountId }, fuzzy: true })
+              !!matchRoute({ to: "/a/$accountId/c/$logicalCardId", params: { accountId } })
             }
             onClick={onNavigate}
           />
-          <NavItem
-            to="/a/$accountId/activity"
-            params={{ accountId }}
-            search={search}
-            label="Activity"
-            active={!!matchRoute({ to: "/a/$accountId/activity", params: { accountId } })}
-            onClick={onNavigate}
-          />
-          <NavItem
-            to="/a/$accountId/insights"
-            params={{ accountId }}
-            search={search}
-            label="Insights"
-            active={!!matchRoute({ to: "/a/$accountId/insights", params: { accountId } })}
-            onClick={onNavigate}
-          />
-          <NavItem
-            to="/a/$accountId/findings"
-            params={{ accountId }}
-            search={search}
-            label="Findings"
-            active={!!matchRoute({ to: "/a/$accountId/findings", params: { accountId } })}
-            onClick={onNavigate}
-          />
+          {cardParams &&
+            CARD_PAGES.map(({ to, label }) => (
+              <NavItem
+                key={to}
+                to={to}
+                params={cardParams}
+                label={label}
+                active={!!matchRoute({ to, params: { accountId } })}
+                onClick={onNavigate}
+              />
+            ))}
         </>
       )}
       <NavItem
@@ -134,6 +133,7 @@ function Nav({ accountId, onNavigate }: { accountId: string | undefined; onNavig
 
 function AccountSwitcher({ accountId }: { accountId: string | undefined }) {
   const { data: accounts = [] } = useQuery(accountsQuery);
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const matchRoute = useMatchRoute();
   const active = accounts.filter((a) => a.archivedAt === null);
@@ -156,15 +156,18 @@ function AccountSwitcher({ accountId }: { accountId: string | undefined }) {
       data={data}
       value={accountId ?? null}
       allowDeselect={false}
-      onChange={(id) => {
+      onChange={async (id) => {
         if (!id) return;
-        // Stay on the findings, insights or activity page when switching, without its filters: cards belong to
-        // one account. A card page has no counterpart in another account, so that goes to the overview.
-        const to =
-          (["/a/$accountId/findings", "/a/$accountId/insights", "/a/$accountId/activity"] as const).find(
-            (page) => matchRoute({ to: page, fuzzy: true }),
-          ) ?? "/a/$accountId";
-        void navigate({ to, params: { accountId: id } });
+        // Stay on the findings, insights or activity page when switching, without its filters, on the other
+        // account's own card (the last chosen there, else its first): cards belong to one account. A card's own
+        // page has no counterpart there, so that goes to the overview, as does an account without cards.
+        const page = CARD_PAGES.find(({ to }) => matchRoute({ to }))?.to;
+        const card = page && defaultCard(id, await queryClient.ensureQueryData(logicalCardsQuery(id)));
+        if (page && card !== undefined) {
+          void navigate({ to: page, params: { accountId: id, logicalCardId: String(card) } });
+        } else {
+          void navigate({ to: "/a/$accountId", params: { accountId: id } });
+        }
       }}
     />
   );

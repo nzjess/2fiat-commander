@@ -19,19 +19,19 @@ import { useDebouncedCallback, useMediaQuery } from "@mantine/hooks";
 import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useRouterState } from "@tanstack/react-router";
 import { useState } from "react";
-import type { Card, LogicalCard } from "../../../../api.ts";
-import { ActivityDrawer } from "../../../../components/ActivityDrawer.tsx";
-import { ActivityTable } from "../../../../components/ActivityTable.tsx";
-import { CardPageHeader } from "../../../../components/CardPageHeader.tsx";
-import { useCategoryColor } from "../../../../components/Categories.tsx";
-import { ErrorView } from "../../../../components/status.tsx";
-import { groupColor, kindsByGroup } from "../../../../lib/cashflow.ts";
+import type { Card, LogicalCard } from "../../../../../../api.ts";
+import { ActivityDrawer } from "../../../../../../components/ActivityDrawer.tsx";
+import { ActivityTable } from "../../../../../../components/ActivityTable.tsx";
+import { CardPageHeader } from "../../../../../../components/CardPageHeader.tsx";
+import { useCategoryColor } from "../../../../../../components/Categories.tsx";
+import { ErrorView } from "../../../../../../components/status.tsx";
+import { groupColor, kindsByGroup } from "../../../../../../lib/cashflow.ts";
 import {
   ACTIVITY_KIND_LABELS,
   ACTIVITY_STATUS_FILTERS,
   FINDING_KIND_LABELS,
   isoToLocalDate,
-} from "../../../../lib/format.ts";
+} from "../../../../../../lib/format.ts";
 import {
   type ActivitySearch,
   activitiesParams,
@@ -40,15 +40,14 @@ import {
   PAGE_SIZES,
   type PageSize,
   parseActivitySearch,
-} from "../../../../lib/search.ts";
-import { defaultCard } from "../../../../lib/storage.ts";
+} from "../../../../../../lib/search.ts";
 import {
   activitiesQuery,
   cardsQuery,
   categoriesQuery,
   findingsQuery,
   logicalCardsQuery,
-} from "../../../../queries.ts";
+} from "../../../../../../queries.ts";
 
 declare module "@tanstack/react-router" {
   interface HistoryState {
@@ -61,32 +60,33 @@ declare module "@tanstack/react-router" {
 }
 
 /** A logical card's ledger, a page at a time, with filters and each activity's details in a drawer. */
-export const Route = createFileRoute("/_app/a/$accountId/activity")({
+export const Route = createFileRoute("/_app/a/$accountId/c/$logicalCardId/activity")({
   validateSearch: parseActivitySearch,
   // Opening an activity's details doesn't reload the list.
   loaderDeps: ({ search: { activity: _, ...filters } }) => filters,
-  loader: async ({ context: { queryClient }, params: { accountId }, deps }) => {
-    const [logicalCards] = await Promise.all([
+  loader: ({ context: { queryClient }, params: { accountId, logicalCardId }, deps }) =>
+    Promise.all([
       queryClient.ensureQueryData(logicalCardsQuery(accountId)),
       queryClient.ensureQueryData(cardsQuery(accountId)),
-    ]);
-    const id = deps.card ?? defaultCard(accountId, logicalCards);
-    if (id === undefined || !logicalCards.some((l) => l.id === id)) return;
-    await queryClient.ensureQueryData(activitiesQuery(accountId, activitiesParams(id, deps), deps.cursor));
-  },
+      queryClient.ensureQueryData(
+        activitiesQuery(accountId, activitiesParams(Number(logicalCardId), deps), deps.cursor),
+      ),
+    ]),
   component: ActivityPage,
 });
 
 function ActivityPage() {
-  const { accountId } = Route.useParams();
+  const { accountId, logicalCardId } = Route.useParams();
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const { data: logicalCards } = useSuspenseQuery(logicalCardsQuery(accountId));
   const { data: cards } = useSuspenseQuery(cardsQuery(accountId));
-  const logical = logicalCards.find((l) => l.id === (search.card ?? defaultCard(accountId, logicalCards)));
+  const logical = logicalCards.find((l) => l.id === Number(logicalCardId));
   const { activity, page, cursor, ...filters } = search;
-  const params = logical && activitiesParams(logical.id, filters);
+  const params = activitiesParams(Number(logicalCardId), filters);
   const earlier = useRouterState({ select: (s) => s.location.state.activityCursors });
+  // E.g. just after its last physical card moved into another logical card.
+  if (!logical) return <Text c="dimmed">This card no longer exists.</Text>;
   // A new filter, or page size, starts again from the first page.
   const update = (patch: Partial<ActivitySearch>) =>
     navigate({
@@ -109,42 +109,47 @@ function ActivityPage() {
         title="Activity"
         logicalCards={logicalCards}
         selected={logical}
-        // A finding belongs to one card, so it doesn't carry over.
-        onSelect={(card) => update({ card, finding: undefined })}
+        // The filters carry over to the other card, but not what belongs to this one: its finding, open activity
+        // and page.
+        onSelect={(other) =>
+          navigate({
+            to: "/a/$accountId/c/$logicalCardId/activity",
+            params: { accountId, logicalCardId: String(other) },
+            search: (prev) => ({
+              ...prev,
+              finding: undefined,
+              activity: undefined,
+              page: undefined,
+              cursor: undefined,
+            }),
+          })
+        }
       />
-      {logical && params ? (
-        <>
-          <Filters search={search} logical={logical} accountId={accountId} update={update} />
-          <Pages
-            // Only the same filters' pages fade into each other.
-            key={JSON.stringify(params)}
-            accountId={accountId}
-            params={params}
-            page={page ?? 1}
-            cursor={cursor}
-            earlier={earlier ?? []}
-            onTurn={turn}
-            cards={cards}
-            logical={logical}
-            selectedId={activity}
-            filtered={Object.keys(filters).some((k) => k !== "card" && k !== "size")}
-            pageSize={search.size ?? DEFAULT_PAGE_SIZE}
-            onPageSize={(size) => update({ size: size === DEFAULT_PAGE_SIZE ? undefined : size })}
-            onOpen={(id) => navigate({ search: (prev) => ({ ...prev, activity: id }) })}
-          />
-          <ActivityDrawer
-            accountId={accountId}
-            activityId={activity}
-            cards={cards}
-            logical={logical}
-            onClose={() => navigate({ search: (prev) => ({ ...prev, activity: undefined }) })}
-          />
-        </>
-      ) : (
-        <Text c="dimmed">
-          {logicalCards.length === 0 ? "No cards yet: sync the account." : "No such card."}
-        </Text>
-      )}
+      <Filters search={search} logical={logical} accountId={accountId} update={update} />
+      <Pages
+        // Only the same filters' pages fade into each other.
+        key={JSON.stringify(params)}
+        accountId={accountId}
+        params={params}
+        page={page ?? 1}
+        cursor={cursor}
+        earlier={earlier ?? []}
+        onTurn={turn}
+        cards={cards}
+        logical={logical}
+        selectedId={activity}
+        filtered={Object.keys(filters).some((k) => k !== "size")}
+        pageSize={search.size ?? DEFAULT_PAGE_SIZE}
+        onPageSize={(size) => update({ size: size === DEFAULT_PAGE_SIZE ? undefined : size })}
+        onOpen={(id) => navigate({ search: (prev) => ({ ...prev, activity: id }) })}
+      />
+      <ActivityDrawer
+        accountId={accountId}
+        activityId={activity}
+        cards={cards}
+        logical={logical}
+        onClose={() => navigate({ search: (prev) => ({ ...prev, activity: undefined }) })}
+      />
     </Stack>
   );
 }

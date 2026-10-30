@@ -18,7 +18,6 @@ import {
   datePresets,
   parseActivitySearch,
   parseFindingsSearch,
-  parseInsightsSearch,
   positiveInt,
   safeRedirect,
 } from "../src/lib/search.ts";
@@ -125,20 +124,14 @@ describe("dates", () => {
 describe("search params", () => {
   test("keeps only well-formed findings filters", () => {
     expect(parseFindingsSearch({})).toEqual({});
-    expect(parseFindingsSearch({ status: "resolved", card: 3, kind: "balance-gap" })).toEqual({
+    expect(parseFindingsSearch({ status: "resolved", kind: "balance-gap" })).toEqual({
       status: "resolved",
-      card: 3,
       kind: "balance-gap",
     });
-    // "open" is the default, so it stays out of the URL.
-    expect(parseFindingsSearch({ status: "open", card: "7" })).toEqual({ card: 7 });
-    expect(parseFindingsSearch({ status: "nope", card: -1, kind: "x;y" })).toEqual({});
+    // "open" is the default, so it stays out of the URL; the card is in the path, not the search.
+    expect(parseFindingsSearch({ status: "open", card: "7" })).toEqual({});
+    expect(parseFindingsSearch({ status: "nope", kind: "x;y" })).toEqual({});
     expect(parseFindingsSearch({ status: "explained" })).toEqual({ status: "explained" });
-  });
-
-  test("keeps only a well-formed insights card", () => {
-    expect(parseInsightsSearch({ card: "4" })).toEqual({ card: 4 });
-    expect(parseInsightsSearch({ card: "x" })).toEqual({});
   });
 
   test("keeps only well-formed activity filters", () => {
@@ -156,7 +149,6 @@ describe("search params", () => {
         activity: "41",
       }),
     ).toEqual({
-      card: 2,
       kind: "purchase,fee",
       status: "stale,pending",
       from: "2026-10-01",
