@@ -45,6 +45,13 @@ export const rulesQuery = (accountId: string) =>
     queryFn: () => ok(account.categories.rules.$get({ param: { accountId } })),
   });
 
+/** Who has which role on the account and its cards: for owners. */
+export const grantsQuery = (accountId: string) =>
+  queryOptions({
+    queryKey: ["accounts", accountId, "grants"],
+    queryFn: () => ok(account.grants.$get({ param: { accountId } })),
+  });
+
 export const cardsQuery = (accountId: string) =>
   queryOptions({
     queryKey: ["accounts", accountId, "cards"],

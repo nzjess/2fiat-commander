@@ -102,7 +102,7 @@ function Details({
         </Group>
       </Stack>
 
-      <ActivityAnnotation accountId={accountId} activity={a} />
+      <ActivityAnnotation accountId={accountId} activity={a} logicalCardId={logical.id} />
 
       <Table variant="vertical" layout="fixed" withTableBorder>
         <Table.Tbody>
@@ -128,8 +128,9 @@ function Details({
             {a.feeCents !== null && a.feeCents !== 0 && formatMoney(a.feeCents)}
           </Field>
           <Field label={a.kind === "transfer_in" ? "From" : "To"}>
-            {counterpart &&
-              `${cardLabel(counterpart)}${isOwnTransfer(a, logical) ? " (this card's own)" : ""}`}
+            {counterpart
+              ? `${cardLabel(counterpart)}${isOwnTransfer(a, logical) ? " (this card's own)" : ""}`
+              : a.counterpartName}
           </Field>
           <Field label="Transfer">{a.transferId}</Field>
         </Table.Tbody>

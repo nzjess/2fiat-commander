@@ -12,6 +12,7 @@ import {
 import { api, isUnauthenticated, send } from "../api.ts";
 import { NavItem, useUrlCard } from "../components/links.tsx";
 import { SyncButton } from "../components/SyncButton.tsx";
+import { accessOf } from "../lib/access.ts";
 import { defaultCard, getLastAccount } from "../lib/storage.ts";
 import { accountsQuery, fxQuery, logicalCardsQuery, meQuery } from "../queries.ts";
 
@@ -92,6 +93,9 @@ function Nav({ accountId, onNavigate }: { accountId: string | undefined; onNavig
         : defaultCard(accountId, logicalCards)
       : undefined;
   const cardParams = accountId && card !== undefined ? { accountId, logicalCardId: String(card) } : undefined;
+  const { data: accounts = [] } = useQuery(accountsQuery);
+  const account = accounts.find((a) => String(a.id) === accountId);
+  const access = account && accessOf(account.access);
   return (
     <>
       {accountId && (
@@ -119,13 +123,24 @@ function Nav({ accountId, onNavigate }: { accountId: string | undefined; onNavig
                 onClick={onNavigate}
               />
             ))}
-          <NavItem
-            to="/a/$accountId/categories"
-            params={{ accountId }}
-            label="Categories"
-            active={!!matchRoute({ to: "/a/$accountId/categories", params: { accountId } })}
-            onClick={onNavigate}
-          />
+          {access?.can("account.view") && (
+            <NavItem
+              to="/a/$accountId/categories"
+              params={{ accountId }}
+              label="Categories"
+              active={!!matchRoute({ to: "/a/$accountId/categories", params: { accountId } })}
+              onClick={onNavigate}
+            />
+          )}
+          {access?.can("grants.manage") && (
+            <NavItem
+              to="/a/$accountId/members"
+              params={{ accountId }}
+              label="Members"
+              active={!!matchRoute({ to: "/a/$accountId/members", params: { accountId } })}
+              onClick={onNavigate}
+            />
+          )}
         </>
       )}
       <NavItem
@@ -165,9 +180,15 @@ function AccountSwitcher({ accountId }: { accountId: string | undefined }) {
       allowDeselect={false}
       onChange={async (id) => {
         if (!id) return;
-        // Every account has a Categories page, showing its own.
-        if (matchRoute({ to: "/a/$accountId/categories" })) {
+        // Every account has these pages, showing its own, for those who may see them there.
+        const other = accounts.find((a) => String(a.id) === id);
+        const access = other && accessOf(other.access);
+        if (matchRoute({ to: "/a/$accountId/categories" }) && access?.can("account.view")) {
           void navigate({ to: "/a/$accountId/categories", params: { accountId: id } });
+          return;
+        }
+        if (matchRoute({ to: "/a/$accountId/members" }) && access?.can("grants.manage")) {
+          void navigate({ to: "/a/$accountId/members", params: { accountId: id } });
           return;
         }
         // Stay on the findings, insights or activity page when switching, without its filters, on the other

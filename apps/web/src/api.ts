@@ -88,3 +88,4 @@ export type Category = Body<AccountApi["categories"]["$get"]>[number];
 export type CategoryColor = Category["color"];
 export type Rule = Body<AccountApi["categories"]["rules"]["$get"]>[number];
 export type RuleMatch = Rule["match"];
+export type Grant = Body<AccountApi["grants"]["$get"]>[number];

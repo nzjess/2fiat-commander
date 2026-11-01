@@ -17,6 +17,7 @@ import { api, type Category, ok, type Rule, type RuleMatch, send } from "../api.
 import { categoriesQuery, rulesQuery } from "../queries.ts";
 import { CategoryLabel } from "./Categories.tsx";
 import { ErrorView } from "./status.tsx";
+import { useAccess } from "./useAccess.ts";
 
 // Category rules: each sets a category on new uncategorised spending that matches it (the first match wins), and
 // on existing spending only when asked. Each account has its own.
@@ -38,7 +39,9 @@ function useRulesChanged(accountId: string) {
 
 /** Says which rule set an activity's category, in the drawer. */
 export function RuleTag({ accountId, ruleId }: { accountId: string; ruleId: number }) {
-  const { data: rules } = useQuery(rulesQuery(accountId));
+  // Rules name merchants from every card, so only someone who sees the whole account gets to read them.
+  const canSeeRules = useAccess(accountId).can("account.view");
+  const { data: rules } = useQuery({ ...rulesQuery(accountId), enabled: canSeeRules });
   const rule = rules?.find((r) => r.id === ruleId);
   return (
     <Text size="xs" c="dimmed">

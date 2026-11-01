@@ -14,8 +14,9 @@ import {
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { type Account, api, ok } from "../../api.ts";
+import { type Account, api, ok, send } from "../../api.ts";
 import { AnchorLink } from "../../components/links.tsx";
+import { accessLabel, accessOf } from "../../lib/access.ts";
 import { formatDate, timeAgo } from "../../lib/format.ts";
 import { accountsQuery } from "../../queries.ts";
 
@@ -24,7 +25,11 @@ export const Route = createFileRoute("/_app/accounts")({
   component: Accounts,
 });
 
-type Dialog = { kind: "add" } | { kind: "rename"; account: Account } | { kind: "replace"; account: Account };
+type Dialog =
+  | { kind: "add" }
+  | { kind: "rename"; account: Account }
+  | { kind: "replace"; account: Account }
+  | { kind: "leave"; account: Account };
 
 function Accounts() {
   const { data: accounts } = useSuspenseQuery(accountsQuery);
@@ -49,6 +54,7 @@ function Accounts() {
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Label</Table.Th>
+                <Table.Th>Your role</Table.Th>
                 <Table.Th>Added</Table.Th>
                 <Table.Th>Last sync</Table.Th>
                 <Table.Th />
@@ -58,6 +64,7 @@ function Accounts() {
               {accounts.map((a) => {
                 const replacement =
                   a.replacedByAccountId === null ? undefined : byId.get(a.replacedByAccountId);
+                const access = accessOf(a.access);
                 return (
                   <Table.Tr key={a.id}>
                     <Table.Td>
@@ -72,6 +79,7 @@ function Accounts() {
                         )}
                       </Group>
                     </Table.Td>
+                    <Table.Td>{accessLabel(a.access)}</Table.Td>
                     <Table.Td>{formatDate(a.createdAt)}</Table.Td>
                     <Table.Td>
                       {a.lastSync === null ? (
@@ -86,14 +94,16 @@ function Accounts() {
                     </Table.Td>
                     <Table.Td>
                       <Group gap="xs" justify="flex-end" wrap="nowrap">
-                        <Button
-                          size="compact-sm"
-                          variant="light"
-                          onClick={() => setDialog({ kind: "rename", account: a })}
-                        >
-                          Rename
-                        </Button>
-                        {a.archivedAt === null && (
+                        {access.can("account.rename") && (
+                          <Button
+                            size="compact-sm"
+                            variant="light"
+                            onClick={() => setDialog({ kind: "rename", account: a })}
+                          >
+                            Rename
+                          </Button>
+                        )}
+                        {a.archivedAt === null && access.can("account.replace") && (
                           <Button
                             size="compact-sm"
                             variant="light"
@@ -103,6 +113,14 @@ function Accounts() {
                             Replace token
                           </Button>
                         )}
+                        <Button
+                          size="compact-sm"
+                          variant="light"
+                          color="red"
+                          onClick={() => setDialog({ kind: "leave", account: a })}
+                        >
+                          Leave
+                        </Button>
                       </Group>
                     </Table.Td>
                   </Table.Tr>
@@ -122,6 +140,42 @@ function Accounts() {
       <Modal opened={dialog?.kind === "replace"} onClose={close} title="Replace the account's token">
         {dialog?.kind === "replace" && <ReplaceToken account={dialog.account} onDone={close} />}
       </Modal>
+      <Modal opened={dialog?.kind === "leave"} onClose={close} title="Leave this account">
+        {dialog?.kind === "leave" && <LeaveAccount account={dialog.account} onDone={close} />}
+      </Modal>
+    </Stack>
+  );
+}
+
+function LeaveAccount({ account, onDone }: { account: Account; onDone: () => void }) {
+  const queryClient = useQueryClient();
+  const leave = useMutation({
+    mutationFn: () =>
+      send(api.accounts[":accountId"].grants.mine.$delete({ param: { accountId: String(account.id) } })),
+    onSuccess: async () => {
+      queryClient.removeQueries({ queryKey: ["accounts", String(account.id)] });
+      await queryClient.invalidateQueries({ queryKey: ["accounts", "list"] });
+      onDone();
+    },
+  });
+  return (
+    <Stack>
+      <Text size="sm">
+        You'll lose all access to <b>{account.label}</b> and its cards, until an owner adds you again.
+      </Text>
+      {leave.error && (
+        <Alert color="red" variant="light">
+          {leave.error.message}
+        </Alert>
+      )}
+      <Group justify="flex-end">
+        <Button variant="default" onClick={onDone}>
+          Cancel
+        </Button>
+        <Button color="red" loading={leave.isPending} onClick={() => leave.mutate()}>
+          Leave
+        </Button>
+      </Group>
     </Stack>
   );
 }

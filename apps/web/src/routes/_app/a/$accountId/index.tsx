@@ -5,6 +5,7 @@ import { api, type Card, type LogicalCard, ok } from "../../../../api.ts";
 import { CardFace } from "../../../../components/CardFace.tsx";
 import { AnchorLink } from "../../../../components/links.tsx";
 import { GapBadge, MissingBadge, TransientBadge } from "../../../../components/status.tsx";
+import { accessOf } from "../../../../lib/access.ts";
 import { formatMoney } from "../../../../lib/format.ts";
 import { accountQuery, cardsQuery, findingsQuery, logicalCardsQuery } from "../../../../queries.ts";
 
@@ -32,7 +33,11 @@ function Overview() {
     <Stack>
       <Title order={2}>{account.label}</Title>
       {logicalCards.length === 0 ? (
-        <NoCards accountId={accountId} archived={account.archivedAt !== null} />
+        <NoCards
+          accountId={accountId}
+          archived={account.archivedAt !== null}
+          canSync={accessOf(account.access).canOnAnyCard("card.sync")}
+        />
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, xl: 3 }}>
           {logicalCards.map((l) => (
@@ -50,7 +55,15 @@ function Overview() {
   );
 }
 
-function NoCards({ accountId, archived }: { accountId: string; archived: boolean }) {
+function NoCards({
+  accountId,
+  archived,
+  canSync,
+}: {
+  accountId: string;
+  archived: boolean;
+  canSync: boolean;
+}) {
   const queryClient = useQueryClient();
   const start = useMutation({
     mutationFn: () => ok(api.accounts[":accountId"].syncs.$post({ param: { accountId } })),
@@ -64,6 +77,10 @@ function NoCards({ accountId, archived }: { accountId: string; archived: boolean
         {archived ? (
           <Text c="dimmed" size="sm">
             This account was archived before any cards were fetched.
+          </Text>
+        ) : !canSync ? (
+          <Text c="dimmed" size="sm">
+            Nothing has been synced from 2fiat yet.
           </Text>
         ) : (
           <>

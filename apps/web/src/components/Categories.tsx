@@ -21,6 +21,7 @@ import { CATEGORY_COLORS, CATEGORY_PALETTE, categoryHex } from "../lib/categorie
 import { categoriesQuery, sameMerchantQuery } from "../queries.ts";
 import { RuleTag, useAlwaysForMerchant } from "./Rules.tsx";
 import { ErrorView } from "./status.tsx";
+import { useAccess } from "./useAccess.ts";
 
 /** A category colour key as the hex for the current colour scheme. */
 export function useCategoryColor(): (color: CategoryColor) => string {
@@ -59,12 +60,56 @@ type Annotated = Pick<
   "id" | "categorizable" | "categoryId" | "categoryRuleId" | "note" | "description"
 >;
 
+/** An activity's category and note in the drawer: to edit, or just to read without the right to change them. */
+export function ActivityAnnotation({
+  accountId,
+  activity,
+  logicalCardId,
+}: {
+  accountId: string;
+  activity: Annotated;
+  logicalCardId: number;
+}) {
+  const access = useAccess(accountId);
+  return access.canOnCard("card.annotate", logicalCardId) ? (
+    <EditableAnnotation accountId={accountId} activity={activity} />
+  ) : (
+    <ReadOnlyAnnotation accountId={accountId} activity={activity} />
+  );
+}
+
+function ReadOnlyAnnotation({ accountId, activity }: { accountId: string; activity: Annotated }) {
+  const { data: categories = [] } = useQuery(categoriesQuery(accountId));
+  const category = categories.find((c) => c.id === activity.categoryId);
+  if (!category && activity.note === null) return null;
+  return (
+    <Stack gap="xs">
+      {category && (
+        <Group gap="xs">
+          <CategoryLabel category={category} />
+          {activity.categoryRuleId !== null && (
+            <Text size="xs" c="dimmed">
+              Set by a rule
+            </Text>
+          )}
+        </Group>
+      )}
+      {activity.note !== null && (
+        <Text size="sm" fs="italic" style={{ whiteSpace: "pre-wrap" }}>
+          {activity.note}
+        </Text>
+      )}
+    </Stack>
+  );
+}
+
 /**
  * An activity's category and note, as the drawer edits them. Spending takes a category (typing a new name creates
- * it); any activity takes a note, saved when the field loses focus. Setting a category offers it for the same
- * merchant's other uncategorised spending.
+ * it, for those who manage categories); any activity takes a note, saved when the field loses focus. Setting a
+ * category offers it for the same merchant's other uncategorised spending.
  */
-export function ActivityAnnotation({ accountId, activity }: { accountId: string; activity: Annotated }) {
+function EditableAnnotation({ accountId, activity }: { accountId: string; activity: Annotated }) {
+  const canManage = useAccess(accountId).can("categories.manage");
   const changed = useAnnotationChanged(accountId);
   const [offer, setOffer] = useState<Category | undefined>();
   const annotate = useMutation({
@@ -85,6 +130,7 @@ export function ActivityAnnotation({ accountId, activity }: { accountId: string;
           accountId={accountId}
           value={activity.categoryId}
           disabled={annotate.isPending}
+          canCreate={canManage}
           onChange={(category) =>
             annotate.mutate(
               { categoryId: category?.id ?? null },
@@ -116,16 +162,18 @@ export function ActivityAnnotation({ accountId, activity }: { accountId: string;
 
 const NEW = "new:";
 
-/** Picks one of the account's categories, or creates one from what's typed. */
-export function CategoryPicker({
+/** Picks one of the account's categories, or with `canCreate` creates one from what's typed. */
+function CategoryPicker({
   accountId,
   value,
   disabled,
+  canCreate,
   onChange,
 }: {
   accountId: string;
   value: number | null;
   disabled?: boolean;
+  canCreate: boolean;
   onChange: (category: Category | null) => void;
 }) {
   const queryClient = useQueryClient();
@@ -152,7 +200,7 @@ export function CategoryPicker({
   const exists = categories.some((c) => c.name.toLowerCase() === typed.toLowerCase());
   const data = [
     ...categories.map((c) => ({ value: String(c.id), label: c.name })),
-    ...(typed && !exists ? [{ value: `${NEW}${typed}`, label: `Create "${typed}"` }] : []),
+    ...(canCreate && typed && !exists ? [{ value: `${NEW}${typed}`, label: `Create "${typed}"` }] : []),
   ];
 
   return (
@@ -162,7 +210,7 @@ export function CategoryPicker({
         placeholder="Uncategorised"
         searchable
         clearable
-        nothingFoundMessage="Type a name to create a category"
+        nothingFoundMessage={canCreate ? "Type a name to create a category" : "No such category"}
         data={data}
         value={value === null ? null : String(value)}
         searchValue={search}
@@ -226,7 +274,10 @@ function NoteField({
   );
 }
 
-/** Offers a category just set for the same merchant's other uncategorised spending, on any of the account's cards. */
+/**
+ * Offers a category just set for the same merchant's other uncategorised spending, on any of the cards the user can
+ * see. Those who manage categories can also make it a rule.
+ */
 function SameMerchantOffer({
   accountId,
   activity,
@@ -251,6 +302,7 @@ function SameMerchantOffer({
     onSuccess: changed,
   });
   const always = useAlwaysForMerchant(accountId, category);
+  const canMakeRule = useAccess(accountId).can("categories.manage");
   const ids = data?.activityIds ?? [];
   if (apply.isSuccess) {
     return (
@@ -267,7 +319,7 @@ function SameMerchantOffer({
       </Text>
     );
   }
-  if (!data) return null;
+  if (!data || (ids.length === 0 && !canMakeRule)) return null;
   const others = `${ids.length} other uncategorised ${ids.length === 1 ? "activity" : "activities"}`;
   return (
     <Paper withBorder p="xs" radius="md">
@@ -296,14 +348,16 @@ function SameMerchantOffer({
             Set on all {ids.length}
           </Button>
         )}
-        <Button
-          size="compact-xs"
-          variant="light"
-          loading={always.isPending}
-          onClick={() => always.mutate(activity.description)}
-        >
-          Always use {category.name} for this merchant
-        </Button>
+        {canMakeRule && (
+          <Button
+            size="compact-xs"
+            variant="light"
+            loading={always.isPending}
+            onClick={() => always.mutate(activity.description)}
+          >
+            Always use {category.name} for this merchant
+          </Button>
+        )}
         <Button size="compact-xs" variant="light" color="gray" onClick={onDone}>
           No thanks
         </Button>

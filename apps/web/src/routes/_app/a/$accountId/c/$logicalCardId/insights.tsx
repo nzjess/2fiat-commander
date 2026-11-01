@@ -7,6 +7,7 @@ import { CardPageHeader } from "../../../../../../components/CardPageHeader.tsx"
 import { CashFlowChart } from "../../../../../../components/CashFlowChart.tsx";
 import { FeesPanel } from "../../../../../../components/FeeSchedules.tsx";
 import { SpendingChart } from "../../../../../../components/SpendingChart.tsx";
+import { accessOf } from "../../../../../../lib/access.ts";
 import {
   accountQuery,
   balanceHistoryQuery,
@@ -71,7 +72,7 @@ function Insights() {
           <FeesPanel
             accountId={accountId}
             logicalCardId={logical.id}
-            readOnly={account.archivedAt !== null}
+            readOnly={account.archivedAt !== null || !accessOf(account.access).can("fees.edit")}
           />
         </Section>
       </Stack>

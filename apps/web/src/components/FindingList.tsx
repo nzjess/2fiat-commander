@@ -8,6 +8,7 @@ import { activityQuery } from "../queries.ts";
 import { type AdjustmentDraft, AdjustmentModal } from "./Adjustments.tsx";
 import { draftFromSuggestion, type FeeScheduleDraft, FeeScheduleModal } from "./FeeSchedules.tsx";
 import { AnchorLink } from "./links.tsx";
+import { useAccess } from "./useAccess.ts";
 
 /**
  * A logical card's reconciliation findings, each with when it was seen and the user's explanation. A balance gap
@@ -66,6 +67,9 @@ function FindingItem({
   readOnly: boolean;
 }) {
   const resolved = finding.resolvedAt !== null;
+  const access = useAccess(accountId);
+  const canOnThisCard = (permission: "card.adjust" | "card.explain") =>
+    logical !== undefined && access.canOnCard(permission, logical.id);
   const [adjustment, setAdjustment] = useState<AdjustmentDraft | null>(null);
   const queryClient = useQueryClient();
   // A top-up's missing credit starts on the order's date; if the top-up can't be fetched, on today's.
@@ -78,7 +82,7 @@ function FindingItem({
   };
   // A gap, or a top-up's missing credit, can be made good with an adjustment: the money 2fiat moved with no row.
   const suggested = adjustmentFor(finding);
-  const canAdjust = !readOnly && !resolved && suggested && card;
+  const canAdjust = !readOnly && !resolved && suggested && card && canOnThisCard("card.adjust");
   // A fee above the advert can be accepted as 2fiat's practice: then only a change in what it charges is a finding.
   const feeKind =
     finding.kind === "fees-above-advertised"
@@ -86,7 +90,7 @@ function FindingItem({
       : finding.kind === "topup-fee-above-advertised"
         ? "topup"
         : undefined;
-  const canAccept = !readOnly && !resolved && feeKind && card;
+  const canAccept = !readOnly && !resolved && feeKind && card && access.can("fees.edit");
   const [feeDraft, setFeeDraft] = useState<FeeScheduleDraft | null>(null);
   const accept = useMutation({
     mutationFn: (query: { cardId: string; kind: "topup" | "transaction" }) =>
@@ -146,6 +150,7 @@ function FindingItem({
         <Explanation
           accountId={accountId}
           finding={finding}
+          canEdit={canOnThisCard("card.explain")}
           action={
             <>
               {canAdjust && (
@@ -207,10 +212,12 @@ function adjustmentFor(finding: Finding): { label: string; draft: AdjustmentDraf
 function Explanation({
   accountId,
   finding,
+  canEdit,
   action,
 }: {
   accountId: string;
   finding: Finding;
+  canEdit: boolean;
   action?: ReactNode;
 }) {
   const queryClient = useQueryClient();
@@ -271,18 +278,20 @@ function Explanation({
   if (finding.explanation === null) {
     return (
       <Group gap="xs">
-        <Button
-          size="compact-xs"
-          variant="light"
-          // Starts from a likely reason, where there is one; the user edits it before saving.
-          onClick={() => {
-            const suggestion = suggestExplanation(finding);
-            selectSuggestion.current = suggestion !== undefined;
-            setDraft(suggestion ?? "");
-          }}
-        >
-          Add an explanation
-        </Button>
+        {canEdit && (
+          <Button
+            size="compact-xs"
+            variant="light"
+            // Starts from a likely reason, where there is one; the user edits it before saving.
+            onClick={() => {
+              const suggestion = suggestExplanation(finding);
+              selectSuggestion.current = suggestion !== undefined;
+              setDraft(suggestion ?? "");
+            }}
+          >
+            Add an explanation
+          </Button>
+        )}
         {action}
       </Group>
     );
@@ -293,18 +302,22 @@ function Explanation({
         {finding.explanation}
       </Text>
       {action}
-      <Button size="compact-xs" variant="light" onClick={() => setDraft(finding.explanation ?? "")}>
-        Edit
-      </Button>
-      <Button
-        size="compact-xs"
-        variant="light"
-        color="red"
-        loading={save.isPending}
-        onClick={() => save.mutate(null)}
-      >
-        Remove
-      </Button>
+      {canEdit && (
+        <>
+          <Button size="compact-xs" variant="light" onClick={() => setDraft(finding.explanation ?? "")}>
+            Edit
+          </Button>
+          <Button
+            size="compact-xs"
+            variant="light"
+            color="red"
+            loading={save.isPending}
+            onClick={() => save.mutate(null)}
+          >
+            Remove
+          </Button>
+        </>
+      )}
     </Group>
   );
 }

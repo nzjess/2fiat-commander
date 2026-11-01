@@ -12,7 +12,7 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { api, type Card, type LogicalCard, ok, send } from "../../../../../../api.ts";
@@ -30,6 +30,8 @@ import {
   OpeningBadge,
   TransientBadge,
 } from "../../../../../../components/status.tsx";
+import { useAccess } from "../../../../../../components/useAccess.ts";
+import { linkGains } from "../../../../../../lib/access.ts";
 import {
   cardLabel,
   cardStatusLabel,
@@ -49,6 +51,7 @@ import {
   cashFlowQuery,
   categoriesQuery,
   findingsQuery,
+  grantsQuery,
   logicalCardsQuery,
 } from "../../../../../../queries.ts";
 
@@ -85,6 +88,7 @@ function LogicalCardPage() {
   const { data: findings } = useSuspenseQuery(findingsQuery(accountId, { card: id }));
   const { data: recent } = useSuspenseQuery(recentQuery(accountId, id));
   const navigate = useNavigate();
+  const access = useAccess(accountId);
   const logical = logicalCards.find((l) => l.id === id);
   // E.g. just after its last physical card moved into another logical card.
   if (!logical) return <Text c="dimmed">This card no longer exists.</Text>;
@@ -116,7 +120,7 @@ function LogicalCardPage() {
         <CardFace card={current} balanceCents={logical.reportedCents} width={340} />
         <Stack gap={4}>
           <Group gap="xs">
-            <Name accountId={accountId} logical={logical} />
+            <Name accountId={accountId} logical={logical} canRename={access.can("cards.rename")} />
             {current.missingSince && <MissingBadge since={current.missingSince} />}
           </Group>
           <Text c="dimmed" size="sm">
@@ -204,7 +208,12 @@ function LogicalCardPage() {
       </Section>
 
       <Section title="Adjustments">
-        <AdjustmentList accountId={accountId} logicalCardId={id} cards={members} readOnly={readOnly} />
+        <AdjustmentList
+          accountId={accountId}
+          logicalCardId={id}
+          cards={members}
+          readOnly={readOnly || !access.canOnCard("card.adjust", id)}
+        />
       </Section>
 
       <Accordion variant="contained">
@@ -212,7 +221,8 @@ function LogicalCardPage() {
           <Accordion.Control>
             <Text fw={600}>Physical cards ({members.length})</Text>
             <Text size="xs" c="dimmed">
-              2fiat's own cards behind this one: link a renewal or replacement here, or set an opening balance
+              2fiat's own cards behind this one
+              {access.can("cards.link") && ": link a renewal or replacement here, or set an opening balance"}
             </Text>
           </Accordion.Control>
           <Accordion.Panel>
@@ -222,7 +232,9 @@ function LogicalCardPage() {
               members={members}
               logicalCards={logicalCards}
               cards={cards}
-              readOnly={readOnly}
+              canSetOpening={!readOnly && access.canOnCard("card.openingBalance", id)}
+              canSetCurrent={access.canOnCard("card.setCurrent", id)}
+              canLink={access.can("cards.link")}
             />
           </Accordion.Panel>
         </Accordion.Item>
@@ -245,7 +257,15 @@ function Section({ title, action, children }: { title: string; action?: ReactNod
   );
 }
 
-function Name({ accountId, logical }: { accountId: string; logical: LogicalCard }) {
+function Name({
+  accountId,
+  logical,
+  canRename,
+}: {
+  accountId: string;
+  logical: LogicalCard;
+  canRename: boolean;
+}) {
   const queryClient = useQueryClient();
   const [name, setName] = useState<string | null>(null);
   const rename = useMutation({
@@ -265,9 +285,11 @@ function Name({ accountId, logical }: { accountId: string; logical: LogicalCard 
     return (
       <Group gap="xs">
         <Title order={2}>{logical.name}</Title>
-        <Button size="compact-sm" variant="light" onClick={() => setName(logical.name)}>
-          Rename
-        </Button>
+        {canRename && (
+          <Button size="compact-sm" variant="light" onClick={() => setName(logical.name)}>
+            Rename
+          </Button>
+        )}
       </Group>
     );
   }
@@ -346,16 +368,24 @@ function PhysicalCards({
   members,
   logicalCards,
   cards,
-  readOnly,
+  canSetOpening,
+  canSetCurrent,
+  canLink,
 }: {
   accountId: string;
   logical: LogicalCard;
   members: Card[];
   logicalCards: LogicalCard[];
   cards: Card[];
-  readOnly: boolean;
+  canSetOpening: boolean;
+  canSetCurrent: boolean;
+  canLink: boolean;
 }) {
   const queryClient = useQueryClient();
+  // Only owners can link, and only owners can read the grants.
+  const { data: grants = [] } = useQuery({ ...grantsQuery(accountId), enabled: canLink });
+  // A link that would show someone more, waiting for the owner to confirm it.
+  const [pendingLink, setPendingLink] = useState<{ other: LogicalCard; gains: string[] } | null>(null);
   const done = () => queryClient.invalidateQueries({ queryKey: ["accounts", accountId] });
   const moveCard = (cardId: number, logicalCardId: number | null) =>
     ok(
@@ -424,10 +454,10 @@ function PhysicalCards({
                 {card.balance && <GapBadge cents={card.balance.gapCents} />}
               </Group>
             </Group>
-            <OpeningBalance accountId={accountId} card={card} readOnly={readOnly} />
-            {members.length > 1 && (
+            <OpeningBalance accountId={accountId} card={card} readOnly={!canSetOpening} />
+            {members.length > 1 && (canLink || (canSetCurrent && !card.isCurrent)) && (
               <Group gap="xs">
-                {!card.isCurrent && (
+                {canSetCurrent && !card.isCurrent && (
                   <Button
                     size="compact-xs"
                     variant="light"
@@ -437,20 +467,22 @@ function PhysicalCards({
                     Make current
                   </Button>
                 )}
-                <Button
-                  size="compact-xs"
-                  variant="light"
-                  loading={separate.isPending && separate.variables === card.id}
-                  onClick={() => separate.mutate(card.id)}
-                >
-                  Separate it into a card of its own
-                </Button>
+                {canLink && (
+                  <Button
+                    size="compact-xs"
+                    variant="light"
+                    loading={separate.isPending && separate.variables === card.id}
+                    onClick={() => separate.mutate(card.id)}
+                  >
+                    Separate it into a card of its own
+                  </Button>
+                )}
               </Group>
             )}
           </Stack>
         </Paper>
       ))}
-      {others.length > 0 && (
+      {canLink && others.length > 0 && (
         <Select
           label="Link another card into this one"
           description="For a renewal or replacement: its history and balance then count as part of this card"
@@ -461,9 +493,35 @@ function PhysicalCards({
           disabled={link.isPending}
           onChange={(value) => {
             const other = logicalCards.find((l) => String(l.id) === value);
-            if (other) link.mutate(other);
+            if (!other) return;
+            const gains = linkGains(grants, other.id, logical.id);
+            if (gains.length > 0) setPendingLink({ other, gains });
+            else link.mutate(other);
           }}
         />
+      )}
+      {pendingLink && (
+        <Paper withBorder p="xs" radius="md" maw={420}>
+          <Text size="sm">
+            Link {pendingLink.other.name} into {logical.name}?{" "}
+            {new Intl.ListFormat("en").format(pendingLink.gains)} will then see the history of both cards.
+          </Text>
+          <Group gap="xs" mt="xs">
+            <Button
+              size="compact-xs"
+              variant="light"
+              onClick={() => {
+                link.mutate(pendingLink.other);
+                setPendingLink(null);
+              }}
+            >
+              Link the cards
+            </Button>
+            <Button size="compact-xs" variant="light" color="gray" onClick={() => setPendingLink(null)}>
+              Cancel
+            </Button>
+          </Group>
+        </Paper>
       )}
       {error && (
         <Text c="red" size="sm">

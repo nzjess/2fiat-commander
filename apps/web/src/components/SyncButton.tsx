@@ -3,8 +3,12 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api, ok, type Sync } from "../api.ts";
+import { accessOf } from "../lib/access.ts";
 import { timeAgo } from "../lib/format.ts";
 import { accountQuery } from "../queries.ts";
+
+/** Without the error, either because none was recorded or because it's about the whole account. */
+const NO_ERROR = "No error to show.";
 
 /**
  * Starts a sync and follows it. The account's `lastSync` is the source of truth: while it's running, the account
@@ -35,12 +39,16 @@ export function SyncButton({ accountId }: { accountId: string }) {
     if (sync?.id !== before.sync.id) return;
     void queryClient.invalidateQueries({ queryKey: ["accounts"] });
     if (sync.status === "ok") {
-      notifications.show({ color: "green", title: "Synced", message: describeRows(sync) });
+      notifications.show({
+        color: "green",
+        title: "Synced",
+        message: describeRows(sync) ?? "The account is up to date.",
+      });
     } else {
       notifications.show({
         color: "red",
         title: `Sync failed${sync.failedStage ? ` at ${sync.failedStage}` : ""}`,
-        message: sync.error ?? "No error was recorded.",
+        message: sync.error ?? NO_ERROR,
         autoClose: false,
       });
     }
@@ -51,9 +59,11 @@ export function SyncButton({ accountId }: { accountId: string }) {
   return (
     <Group gap="xs" wrap="nowrap">
       <SyncStatus sync={sync} />
-      <Button size="xs" variant="light" loading={running} onClick={() => start.mutate()}>
-        Sync
-      </Button>
+      {accessOf(account.access).canOnAnyCard("card.sync") && (
+        <Button size="xs" variant="light" loading={running} onClick={() => start.mutate()}>
+          Sync
+        </Button>
+      )}
     </Group>
   );
 }
@@ -87,24 +97,26 @@ function SyncStatus({ sync }: { sync: Sync | null }) {
   const when = timeAgo(sync.finishedAt ?? sync.startedAt, now);
   if (sync.status === "failed") {
     return (
-      <Tooltip label={sync.error ?? "No error was recorded"} multiline w={320}>
+      <Tooltip label={sync.error ?? NO_ERROR} multiline w={320}>
         <Text size="xs" c="red" visibleFrom="md">
           Sync failed {when}
         </Text>
       </Tooltip>
     );
   }
-  return (
-    <Tooltip label={describeRows(sync)}>
-      <Text size="xs" c="dimmed" visibleFrom="md">
-        Synced {when}
-      </Text>
-    </Tooltip>
+  const synced = (
+    <Text size="xs" c="dimmed" visibleFrom="md">
+      Synced {when}
+    </Text>
   );
+  const rows = describeRows(sync);
+  return rows ? <Tooltip label={rows}>{synced}</Tooltip> : synced;
 }
 
+/** What a sync did, for those who get to see it: it covers the whole account. */
 function describeRows(sync: Sync) {
-  const parts = [`${sync.rowsNew ?? 0} new`, `${sync.rowsUpdated ?? 0} changed`];
+  if (sync.rowsNew === null) return undefined;
+  const parts = [`${sync.rowsNew} new`, `${sync.rowsUpdated} changed`];
   if ((sync.rowsMissing ?? 0) > 0) parts.push(`${sync.rowsMissing} missing`);
   return `${parts.join(", ")} rows`;
 }

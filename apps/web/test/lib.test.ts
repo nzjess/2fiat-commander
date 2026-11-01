@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { ApiError, apiError, isUnauthenticated } from "../src/api.ts";
 import { cardNetwork, expiryLabel } from "../src/components/CardFace.tsx";
+import { accessLabel, accessOf, linkGains, roleLabel, roleOptions } from "../src/lib/access.ts";
 import {
   cardLabel,
   cardStatusLabel,
@@ -286,5 +287,89 @@ describe("the remembered card", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("access", () => {
+  const none = { accountRole: null, account: [], everyCard: [], cards: [] };
+
+  test("a whole-account grant applies to every card, and a card grant to its card", () => {
+    const whole = accessOf({
+      ...none,
+      accountRole: "member",
+      account: ["account.view"],
+      everyCard: ["card.view"],
+    });
+    expect(whole.can("account.view")).toBe(true);
+    expect(whole.can("fees.edit")).toBe(false);
+    expect(whole.canOnCard("card.view", 9)).toBe(true);
+    expect(whole.canOnCard("card.adjust", 9)).toBe(false);
+
+    const card = accessOf({
+      ...none,
+      cards: [{ logicalCardId: 1, role: "manager", permissions: ["card.view", "card.sync"] }],
+    });
+    expect(card.can("account.view")).toBe(false);
+    expect(card.canOnCard("card.sync", 1)).toBe(true);
+    expect(card.canOnCard("card.view", 2)).toBe(false);
+    expect(card.canOnAnyCard("card.sync")).toBe(true);
+    expect(card.canOnAnyCard("card.adjust")).toBe(false);
+  });
+
+  test("grants add up", () => {
+    const both = accessOf({
+      ...none,
+      accountRole: "member",
+      account: ["account.view"],
+      everyCard: ["card.view"],
+      cards: [{ logicalCardId: 1, role: "manager", permissions: ["card.view", "card.adjust"] }],
+    });
+    expect(both.canOnCard("card.adjust", 1)).toBe(true);
+    expect(both.canOnCard("card.adjust", 2)).toBe(false);
+    expect(both.canOnCard("card.view", 2)).toBe(true);
+  });
+
+  test("names roles as the UI does: a manager of a card is its card owner", () => {
+    expect(roleLabel("owner", false)).toBe("Owner");
+    expect(roleLabel("manager", false)).toBe("Manager");
+    expect(roleLabel("member", false)).toBe("Member");
+    expect(roleLabel("manager", true)).toBe("Card owner");
+    expect(roleLabel("member", true)).toBe("Card member");
+  });
+
+  test("offers owner only on the whole account", () => {
+    expect(roleOptions(false).map((o) => o.value)).toEqual(["owner", "manager", "member"]);
+    expect(roleOptions(true)).toEqual([
+      { value: "manager", label: "Card owner" },
+      { value: "member", label: "Card member" },
+    ]);
+  });
+
+  test("describes a user's own access", () => {
+    expect(accessLabel({ ...none, accountRole: "owner" })).toBe("Owner");
+    const card = (logicalCardId: number, role: "manager" | "member") => ({
+      logicalCardId,
+      role,
+      permissions: [],
+    });
+    expect(accessLabel({ ...none, cards: [card(1, "manager"), card(2, "manager")] })).toBe("Card owner");
+    expect(accessLabel({ ...none, cards: [card(1, "manager"), card(2, "member")] })).toBe(
+      "Card owner, Card member",
+    );
+    expect(accessLabel({ ...none, accountRole: "member", cards: [card(1, "manager")] })).toBe("Member");
+  });
+
+  test("a link shows more to those with a grant on just one of the two cards", () => {
+    const grants = [
+      { username: "owner", logicalCardId: null },
+      { username: "owner", logicalCardId: 1 },
+      { username: "zoe", logicalCardId: 1 },
+      { username: "amy", logicalCardId: 2 },
+      { username: "both", logicalCardId: 1 },
+      { username: "both", logicalCardId: 2 },
+      { username: "elsewhere", logicalCardId: 3 },
+    ];
+    expect(linkGains(grants, 1, 2)).toEqual(["amy", "zoe"]);
+    expect(linkGains([], 1, 2)).toEqual([]);
   });
 });
