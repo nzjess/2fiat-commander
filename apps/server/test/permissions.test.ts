@@ -61,8 +61,8 @@ async function world() {
   const app = createApp({ db, secrets, runner, session, now: () => now });
 
   const userIds = Object.fromEntries(
-    [...ROLES, "outsider"].map((name) => [name, createUser(db, name, "x")]),
-  ) as Record<Role | "outsider", number>;
+    [...ROLES, "outsider", "coOwner"].map((name) => [name, createUser(db, name, "x")]),
+  ) as Record<Role | "outsider" | "coOwner", number>;
   const accountId = createAccount(db, secrets, { userId: userIds.owner, label: "main", token: TOKEN });
   await runner.sync(accountId, "manual");
 
@@ -79,6 +79,7 @@ async function world() {
     .values([
       { accountId, userId: userIds.manager, role: "manager" },
       { accountId, userId: userIds.member, role: "member" },
+      { accountId, userId: userIds.coOwner, role: "owner" },
       { accountId, logicalCardId: a.logicalCardId, userId: userIds.cardManager, role: "manager" },
       { accountId, logicalCardId: a.logicalCardId, userId: userIds.cardMember, role: "member" },
     ])
@@ -144,7 +145,7 @@ async function world() {
       `${SESSION_COOKIE}=${createSession(db, id, now).token}`,
     ]),
   );
-  const request = (user: Role | "outsider", method: string, path: string, body?: unknown) =>
+  const request = (user: Role | "outsider" | "coOwner", method: string, path: string, body?: unknown) =>
     app.request(`/api/accounts/${accountId}${path}`, {
       method,
       headers: {
@@ -161,6 +162,19 @@ async function world() {
     accountId,
     request,
     cookies,
+    secrets,
+    userIds,
+    grantOf: (user: Role | "coOwner", logicalCardId: number | null = null) => {
+      const scope =
+        logicalCardId === null ? isNull(grants.logicalCardId) : eq(grants.logicalCardId, logicalCardId);
+      const grant = db
+        .select()
+        .from(grants)
+        .where(and(eq(grants.accountId, accountId), eq(grants.userId, userIds[user]), scope))
+        .get();
+      if (!grant) throw new Error(`no grant for ${user}`);
+      return grant.id;
+    },
     a,
     b,
     category,
@@ -405,6 +419,25 @@ const CASES: RouteCase[] = [
     perCard: true,
     allowed: WORKERS,
     on: (w, c) => ({ path: `/adjustments/${c === "a" ? w.adjustmentA : w.adjustmentB}` }),
+  },
+
+  // Grants
+  { route: "GET /grants", allowed: OWNER, on: () => ({ path: "/grants" }) },
+  {
+    route: "POST /grants",
+    allowed: OWNER,
+    on: () => ({ path: "/grants", body: { username: "outsider", logicalCardId: null, role: "member" } }),
+  },
+  { route: "DELETE /grants/mine", allowed: ANY, on: () => ({ path: "/grants/mine" }) },
+  {
+    route: "PATCH /grants/:grantId",
+    allowed: OWNER,
+    on: (w) => ({ path: `/grants/${w.grantOf("member")}`, body: { role: "manager" } }),
+  },
+  {
+    route: "DELETE /grants/:grantId",
+    allowed: OWNER,
+    on: (w) => ({ path: `/grants/${w.grantOf("member")}` }),
   },
 
   // Fee schedules
@@ -769,5 +802,304 @@ describe("what a user with a grant on one card gets from account-wide routes", (
       .run();
     const list = await json<{ id: number }[]>(await w.request("cardManager", "GET", "/cards"));
     expect(list.map((c) => c.id).toSorted()).toEqual([w.a.id, w.b.id].toSorted());
+  });
+});
+
+describe("managing grants", () => {
+  const add = (w: World, body: { username: string; logicalCardId: number | null; role: string }) =>
+    w.request("owner", "POST", "/grants", body);
+  const owners = (w: World) =>
+    w.db
+      .select()
+      .from(grants)
+      .where(and(eq(grants.accountId, w.accountId), eq(grants.role, "owner"), isNull(grants.logicalCardId)))
+      .all();
+
+  test("lists who has what, with usernames", async () => {
+    const w = await world();
+    const res = await w.request("owner", "GET", "/grants");
+    expect(await res.json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ username: "member", logicalCardId: null, role: "member" }),
+        expect.objectContaining({
+          username: "cardManager",
+          logicalCardId: w.a.logicalCardId,
+          role: "manager",
+        }),
+      ]),
+    );
+  });
+
+  test("a new grant applies to that user's very next request", async () => {
+    const w = await world();
+    expect((await w.request("outsider", "GET", "/cards")).status).toBe(404);
+    const res = await add(w, { username: "outsider", logicalCardId: w.b.logicalCardId, role: "member" });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ username: "outsider", logicalCardId: w.b.logicalCardId });
+    const seen = (await (await w.request("outsider", "GET", "/cards")).json()) as { id: number }[];
+    expect(seen.map((c) => c.id)).toEqual([w.b.id]);
+  });
+
+  test("an unknown username says so", async () => {
+    const w = await world();
+    const res = await add(w, { username: "nobody", logicalCardId: null, role: "member" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "unknown_user" });
+  });
+
+  test("a second grant in the same place is refused, but one elsewhere is fine", async () => {
+    const w = await world();
+    const again = await add(w, { username: "member", logicalCardId: null, role: "manager" });
+    expect(again.status).toBe(409);
+    expect(await again.json()).toMatchObject({ error: "duplicate_grant" });
+    const before = w.grantOf("member");
+    expect(
+      (await add(w, { username: "member", logicalCardId: w.a.logicalCardId, role: "manager" })).status,
+    ).toBe(201);
+    expect(w.grantOf("member")).toBe(before);
+  });
+
+  test("owner can't be granted on a card, by adding or by changing a role", async () => {
+    const w = await world();
+    const adding = await add(w, { username: "outsider", logicalCardId: w.a.logicalCardId, role: "owner" });
+    expect(adding.status).toBe(400);
+    const grant = w.grantOf("cardManager", w.a.logicalCardId);
+    expect((await w.request("owner", "PATCH", `/grants/${grant}`, { role: "owner" })).status).toBe(400);
+  });
+
+  test("an account owner can also hold a grant on a card", async () => {
+    const w = await world();
+    expect(
+      (await add(w, { username: "owner", logicalCardId: w.a.logicalCardId, role: "manager" })).status,
+    ).toBe(201);
+  });
+
+  test("a card from another account, or an unknown role, is refused", async () => {
+    const w = await world();
+    const other = createAccount(w.db, w.secrets, {
+      userId: w.userIds.owner,
+      label: "other",
+      token: NEW_TOKEN,
+    });
+    const theirs = w.db.insert(logicalCards).values({ accountId: other, name: "x" }).returning().get().id;
+    expect((await add(w, { username: "outsider", logicalCardId: theirs, role: "member" })).status).toBe(400);
+    expect((await add(w, { username: "outsider", logicalCardId: null, role: "auditor" })).status).toBe(400);
+  });
+
+  test("another account's grant can't be reached through this one", async () => {
+    const w = await world();
+    const other = createAccount(w.db, w.secrets, {
+      userId: w.userIds.member,
+      label: "other",
+      token: NEW_TOKEN,
+    });
+    const theirs = w.db.select().from(grants).where(eq(grants.accountId, other)).get()?.id;
+    expect((await w.request("owner", "PATCH", `/grants/${theirs}`, { role: "member" })).status).toBe(404);
+    expect((await w.request("owner", "DELETE", `/grants/${theirs}`)).status).toBe(404);
+    expect(w.db.select().from(grants).where(eq(grants.accountId, other)).all()).toHaveLength(1);
+  });
+
+  test("demoting and then removing an owner leaves their grant on a card, each step on its own", async () => {
+    const w = await world();
+    const card = w.a.logicalCardId;
+    expect((await add(w, { username: "coOwner", logicalCardId: card, role: "manager" })).status).toBe(201);
+    const note = (activityId: number) =>
+      w.request("coOwner", "PATCH", `/activities/${activityId}/annotation`, { note: "hello" });
+
+    expect((await w.request("coOwner", "GET", "/grants")).status).toBe(200);
+    expect((await note(w.activityB)).status).toBe(200);
+
+    const whole = w.grantOf("coOwner");
+    expect((await w.request("owner", "PATCH", `/grants/${whole}`, { role: "member" })).status).toBe(200);
+    expect((await w.request("coOwner", "GET", "/grants")).status).toBe(403);
+    expect((await note(w.activityA)).status).toBe(200);
+    expect((await note(w.activityB)).status).toBe(403);
+    expect((await w.request("coOwner", "GET", `/activities/${w.activityB}`)).status).toBe(200);
+
+    expect((await w.request("owner", "DELETE", `/grants/${whole}`)).status).toBe(204);
+    expect((await note(w.activityA)).status).toBe(200);
+    expect((await w.request("coOwner", "GET", `/activities/${w.activityB}`)).status).toBe(404);
+    expect(w.grantOf("coOwner", card)).toBeDefined();
+  });
+
+  describe("the last owner", () => {
+    async function oneOwner() {
+      const w = await world();
+      expect((await w.request("owner", "DELETE", `/grants/${w.grantOf("coOwner")}`)).status).toBe(204);
+      return w;
+    }
+
+    test("can't be demoted, removed or leave, and nothing changes", async () => {
+      const w = await oneOwner();
+      const grant = w.grantOf("owner");
+      const attempts = [
+        await w.request("owner", "PATCH", `/grants/${grant}`, { role: "manager" }),
+        await w.request("owner", "DELETE", `/grants/${grant}`),
+        await w.request("owner", "DELETE", "/grants/mine"),
+      ];
+      for (const res of attempts) {
+        expect(res.status).toBe(409);
+        expect(await res.json()).toMatchObject({ error: "last_owner" });
+      }
+      expect(owners(w)).toHaveLength(1);
+    });
+
+    test("leaving as the last owner keeps their card grants too", async () => {
+      const w = await oneOwner();
+      await add(w, { username: "owner", logicalCardId: w.a.logicalCardId, role: "manager" });
+      expect((await w.request("owner", "DELETE", "/grants/mine")).status).toBe(409);
+      expect(w.grantOf("owner", w.a.logicalCardId)).toBeDefined();
+    });
+
+    test("can go once there's another owner", async () => {
+      const w = await oneOwner();
+      await add(w, { username: "member", logicalCardId: w.a.logicalCardId, role: "manager" });
+      const res = await w.request("owner", "PATCH", `/grants/${w.grantOf("member")}`, { role: "owner" });
+      expect(res.status).toBe(200);
+      expect((await w.request("owner", "DELETE", "/grants/mine")).status).toBe(204);
+      expect(owners(w).map((g) => g.userId)).toEqual([w.userIds.member]);
+    });
+
+    test("keeping the owner role isn't demoting", async () => {
+      const w = await oneOwner();
+      const res = await w.request("owner", "PATCH", `/grants/${w.grantOf("owner")}`, { role: "owner" });
+      expect(res.status).toBe(200);
+    });
+  });
+
+  test("one of two owners can leave", async () => {
+    const w = await world();
+    expect((await w.request("coOwner", "DELETE", "/grants/mine")).status).toBe(204);
+    expect(owners(w).map((g) => g.userId)).toEqual([w.userIds.owner]);
+  });
+
+  test("leaving gives up every grant on the account, and only that account", async () => {
+    const w = await world();
+    const other = createAccount(w.db, w.secrets, {
+      userId: w.userIds.member,
+      label: "other",
+      token: NEW_TOKEN,
+    });
+    await add(w, { username: "member", logicalCardId: w.a.logicalCardId, role: "manager" });
+    expect((await w.request("member", "DELETE", "/grants/mine")).status).toBe(204);
+    expect((await w.request("member", "GET", "")).status).toBe(404);
+    const left = w.db.select().from(grants).where(eq(grants.userId, w.userIds.member)).all();
+    expect(left.map((g) => g.accountId)).toEqual([other]);
+  });
+});
+
+describe("linking and separating cards", () => {
+  const link = (w: World, cardId: number, logicalCardId: number | null) =>
+    w.request("owner", "PATCH", `/cards/${cardId}`, { logicalCardId });
+  const seen = async (w: World, user: Role) =>
+    ((await (await w.request(user, "GET", "/cards")).json()) as { id: number }[]).map((c) => c.id).toSorted();
+  const grantA = (w: World, username: string, logicalCardId: number, role: Role) =>
+    w.request("owner", "POST", "/grants", { username, logicalCardId, role });
+
+  test("a grant follows when its logical card goes, and then covers the whole linked card", async () => {
+    const w = await world();
+    expect((await link(w, w.a.id, w.b.logicalCardId)).status).toBe(200);
+    expect(w.grantOf("cardManager", w.b.logicalCardId)).toBeDefined();
+    expect(await seen(w, "cardManager")).toEqual([w.a.id, w.b.id].toSorted());
+    const res = await w.request("cardManager", "PATCH", `/activities/${w.activityB}/annotation`, {
+      note: "yes",
+    });
+    expect(res.status).toBe(200);
+  });
+
+  test("a user with a grant on both keeps the higher role, whichever way round", async () => {
+    const w = await world();
+    await grantA(w, "cardManager", w.b.logicalCardId, "member");
+    await grantA(w, "cardMember", w.b.logicalCardId, "manager");
+    expect((await link(w, w.a.id, w.b.logicalCardId)).status).toBe(200);
+    const rows = w.db.select().from(grants).where(eq(grants.logicalCardId, w.b.logicalCardId)).all();
+    const roleOf = (user: Role) => rows.find((g) => g.userId === w.userIds[user])?.role;
+    expect(roleOf("cardManager")).toBe("manager");
+    expect(roleOf("cardMember")).toBe("manager");
+    expect(rows).toHaveLength(2);
+  });
+
+  test("separating a card out of a linked pair leaves grants where they are, so the new card has none", async () => {
+    const w = await world();
+    expect((await link(w, w.b.id, w.a.logicalCardId)).status).toBe(200);
+    expect(await seen(w, "cardManager")).toEqual([w.a.id, w.b.id].toSorted());
+    expect((await link(w, w.b.id, null)).status).toBe(200);
+    expect(await seen(w, "cardManager")).toEqual([w.a.id]);
+    expect(w.grantOf("cardManager", w.a.logicalCardId)).toBeDefined();
+  });
+
+  test("separating a logical card's only card keeps its grants on the card", async () => {
+    const w = await world();
+    expect((await link(w, w.a.id, null)).status).toBe(200);
+    expect(await seen(w, "cardManager")).toEqual([w.a.id]);
+  });
+
+  test("moving one of several cards away leaves grants on the logical card that stays", async () => {
+    const w = await world();
+    await link(w, w.b.id, w.a.logicalCardId);
+    const third = w.db
+      .insert(logicalCards)
+      .values({ accountId: w.accountId, name: "third" })
+      .returning()
+      .get().id;
+    expect((await link(w, w.b.id, third)).status).toBe(200);
+    expect(await seen(w, "cardMember")).toEqual([w.a.id]);
+    expect(w.db.select().from(grants).where(eq(grants.logicalCardId, third)).all()).toEqual([]);
+  });
+});
+
+describe("what the account says about the user's access", () => {
+  type AccountBody = {
+    replacedByAccountId: number | null;
+    access: {
+      accountRole: string | null;
+      account: string[];
+      everyCard: string[];
+      cards: { logicalCardId: number; role: string; permissions: string[] }[];
+    };
+  };
+  const account = async (w: World, user: Role) =>
+    (await (await w.request(user, "GET", "")).json()) as AccountBody;
+
+  test("an owner, a manager and a member of the account", async () => {
+    const w = await world();
+    const owner = (await account(w, "owner")).access;
+    expect(owner.accountRole).toBe("owner");
+    expect(owner.account).toContain("grants.manage");
+    expect(owner.everyCard).toContain("card.adjust");
+    const manager = (await account(w, "manager")).access;
+    expect(manager.account).toEqual(["account.view", "fees.edit", "categories.manage"]);
+    const member = (await account(w, "member")).access;
+    expect(member.account).toEqual(["account.view"]);
+    expect(member.everyCard).toEqual(["card.view"]);
+  });
+
+  test("someone with a role on one card gets nothing on the account or every card", async () => {
+    const w = await world();
+    const { access } = await account(w, "cardManager");
+    expect(access).toMatchObject({ accountRole: null, account: [], everyCard: [] });
+    expect(access.cards).toHaveLength(1);
+    expect(access.cards[0]).toMatchObject({ logicalCardId: w.a.logicalCardId, role: "manager" });
+    expect(access.cards[0]?.permissions).toContain("card.adjust");
+    const member = (await account(w, "cardMember")).access;
+    expect(member.cards[0]?.permissions).toEqual(["card.view"]);
+  });
+
+  test("the account list carries each account's access", async () => {
+    const w = await world();
+    const res = await w.app.request("/api/accounts", {
+      headers: { origin: "http://localhost", cookie: w.cookies.member ?? "" },
+    });
+    expect(await res.json()).toMatchObject([{ access: { accountRole: "member" } }]);
+  });
+
+  test("an archived account names its replacement only to those with access to it", async () => {
+    const w = await world();
+    const res = await w.request("owner", "POST", "/replacement", { token: NEW_TOKEN });
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: number };
+    expect((await account(w, "owner")).replacedByAccountId).toBe(id);
+    expect((await account(w, "member")).replacedByAccountId).toBe(id);
+    expect((await account(w, "cardManager")).replacedByAccountId).toBeNull();
   });
 });

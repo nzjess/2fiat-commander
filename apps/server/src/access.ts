@@ -54,8 +54,12 @@ export interface Access {
   seesAllCards: boolean;
   /** The logical cards they hold a grant on: with `seesAllCards` false, all they can see. */
   grantedCardIds: readonly number[];
+  /** Their grants on cards, each with its role. */
+  cardGrants: readonly { logicalCardId: number; role: Role }[];
   can(permission: AccountPermission): boolean;
   canOnCard(permission: CardPermission, logicalCardId: number): boolean;
+  /** Through a grant on the whole account. */
+  canOnEveryCard(permission: CardPermission): boolean;
   /** For what is account-wide but open to grants on a card, such as starting a sync. */
   canOnAnyCard(permission: CardPermission): boolean;
 }
@@ -69,12 +73,30 @@ export function resolveAccess(userGrants: readonly Grant[]): Access {
     accountRole: onAccount[0]?.role ?? null,
     seesAllCards: onAccount.length > 0,
     grantedCardIds: userGrants.flatMap((g) => (g.logicalCardId === null ? [] : [g.logicalCardId])),
+    cardGrants: userGrants.flatMap(({ logicalCardId, role }) =>
+      logicalCardId === null ? [] : [{ logicalCardId, role }],
+    ),
     can: (permission) => onAccount.some((g) => allows(g, permission)),
     canOnCard: (permission, logicalCardId) =>
       userGrants.some(
         (g) => (g.logicalCardId === null || g.logicalCardId === logicalCardId) && allows(g, permission),
       ),
+    canOnEveryCard: (permission) => onAccount.some((g) => allows(g, permission)),
     canOnAnyCard: (permission) => userGrants.some((g) => allows(g, permission)),
+  };
+}
+
+/** What the web app needs to hide what a user can't do. The server still checks every request. */
+export function accessDto(access: Access) {
+  return {
+    accountRole: access.accountRole,
+    account: ACCOUNT_PERMISSIONS.filter((p) => access.can(p)),
+    everyCard: CARD_PERMISSIONS.filter((p) => access.canOnEveryCard(p)),
+    cards: access.cardGrants.map(({ logicalCardId, role }) => ({
+      logicalCardId,
+      role,
+      permissions: CARD_PERMISSIONS.filter((p) => access.canOnCard(p, logicalCardId)),
+    })),
   };
 }
 

@@ -2,7 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { and, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
-import { accountsOfUser, loadAccess } from "../access.ts";
+import { accessDto, accountsOfUser, loadAccess } from "../access.ts";
 import {
   AccountArchivedError,
   assertNewToken,
@@ -55,7 +55,12 @@ export function syncDto(s: SyncRow, seesAllCards: boolean) {
   };
 }
 
-function accountDto(db: Db, a: AccountRow, seesAllCards: boolean) {
+/** An account as this user may see it. */
+function accountDto(db: Db, a: AccountRow, userId: number) {
+  const access = loadAccess(db, a.id, userId);
+  if (!access) throw notFound("account");
+  const canReachReplacement =
+    a.replacedByAccountId !== null && loadAccess(db, a.replacedByAccountId, userId) !== undefined;
   const lastSync = db
     .select()
     .from(syncs)
@@ -68,8 +73,10 @@ function accountDto(db: Db, a: AccountRow, seesAllCards: boolean) {
     label: a.label,
     createdAt: a.createdAt,
     archivedAt: a.archivedAt,
-    replacedByAccountId: a.replacedByAccountId,
-    lastSync: lastSync ? syncDto(lastSync, seesAllCards) : null,
+    /** Only if the user has access to it: a grant on a card doesn't carry over to a new token's new cards. */
+    replacedByAccountId: canReachReplacement ? a.replacedByAccountId : null,
+    lastSync: lastSync ? syncDto(lastSync, access.seesAllCards) : null,
+    access: accessDto(access),
   };
 }
 
@@ -98,13 +105,7 @@ export function accountRoutes(deps: AppDeps) {
 
   return (
     new Hono<UserEnv>()
-      .get("/", (c) =>
-        c.json(
-          accountsOfUser(db, c.var.user.id).map((a) =>
-            accountDto(db, a, loadAccess(db, a.id, c.var.user.id)?.seesAllCards ?? false),
-          ),
-        ),
-      )
+      .get("/", (c) => c.json(accountsOfUser(db, c.var.user.id).map((a) => accountDto(db, a, c.var.user.id))))
       // Only checks the token with 2fiat: the first sync is up to the caller.
       .post("/", zValidator("json", z.object({ label: Label, token: Token }), invalid), async (c) => {
         const { label, token } = c.req.valid("json");
@@ -113,7 +114,7 @@ export function accountRoutes(deps: AppDeps) {
         const sid = await verifyToken(token, { session: deps.session, now: now() });
         const id = createAccount(db, secrets, { userId, label, token, sid });
         await pullCardsIfAble(deps, id);
-        return c.json(accountDto(db, getAccount(db, id), true), 201);
+        return c.json(accountDto(db, getAccount(db, id), userId), 201);
       })
   );
 }
@@ -125,7 +126,7 @@ export function accountScopedRoutes(deps: AppDeps) {
 
   return (
     new Hono<AccountEnv>()
-      .get("/", anyRole, (c) => c.json(accountDto(db, c.var.account, c.var.access.seesAllCards)))
+      .get("/", anyRole, (c) => c.json(accountDto(db, c.var.account, c.var.user.id)))
       .patch(
         "/",
         requireAccount("account.rename"),
@@ -135,7 +136,7 @@ export function accountScopedRoutes(deps: AppDeps) {
             .set({ label: c.req.valid("json").label })
             .where(eq(accounts.id, c.var.account.id))
             .run();
-          return c.json(accountDto(db, getAccount(db, c.var.account.id), c.var.access.seesAllCards));
+          return c.json(accountDto(db, getAccount(db, c.var.account.id), c.var.user.id));
         },
       )
       // 2fiat replaced the account's token: the new token becomes a new account, and this one is archived.
@@ -151,7 +152,7 @@ export function accountScopedRoutes(deps: AppDeps) {
           const sid = await verifyToken(token, { session: deps.session, now: now() });
           const id = replaceAccount(db, secrets, account.id, { label, token, sid, now: now() });
           await pullCardsIfAble(deps, id);
-          return c.json(accountDto(db, getAccount(db, id), c.var.access.seesAllCards), 201);
+          return c.json(accountDto(db, getAccount(db, id), c.var.user.id), 201);
         },
       )
       // Starts a sync (or joins the running one) and returns straight away: poll the sync for its outcome.

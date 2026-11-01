@@ -15,6 +15,7 @@ import {
   logicalCards,
   openingBalances,
 } from "../db/schema.ts";
+import { moveCardGrantsIn } from "../grants.ts";
 import { reevaluate } from "../reevaluate.ts";
 import { type AccountEnv, ApiError, type AppDeps, idParam, invalid, notFound } from "./common.ts";
 import {
@@ -264,6 +265,13 @@ export function cardRoutes(deps: AppDeps) {
             if (current && issuedAfter(card, current)) makeCurrent(q, { ...card, logicalCardId: target });
             electCurrent(q, target);
             electCurrent(q, card.logicalCardId);
+            // The logical card it came from goes if that was its last card, and whoever had a grant on it follows.
+            const emptied = !q
+              .select({ id: cards.id })
+              .from(cards)
+              .where(eq(cards.logicalCardId, card.logicalCardId))
+              .get();
+            if (emptied) moveCardGrantsIn(q, card.logicalCardId, target);
             q.delete(logicalCards)
               .where(
                 and(

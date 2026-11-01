@@ -13,6 +13,7 @@ import { DuplicateCategoryError, DuplicateRuleError } from "../categories.ts";
 import type { Db } from "../db/db.ts";
 import { accounts } from "../db/schema.ts";
 import { LedgerNotReadyError } from "../evaluate.ts";
+import { DuplicateGrantError, LastOwnerError, UnknownUserError } from "../grants.ts";
 import type { Secrets } from "../secrets.ts";
 import { SyncAlreadyRunningError, type SyncRunner } from "../sync.ts";
 
@@ -59,6 +60,9 @@ function toApiError(err: Error): ApiError | undefined {
   if (err instanceof DuplicateCategoryError) return new ApiError(409, "duplicate_category", err.message);
   if (err instanceof DuplicateRuleError) return new ApiError(409, "duplicate_rule", err.message);
   if (err instanceof AdjustmentNotFoundError) return new ApiError(404, "not_found", err.message);
+  if (err instanceof UnknownUserError) return new ApiError(400, "unknown_user", err.message);
+  if (err instanceof DuplicateGrantError) return new ApiError(409, "duplicate_grant", err.message);
+  if (err instanceof LastOwnerError) return new ApiError(409, "last_owner", err.message);
   if (err instanceof SyncAlreadyRunningError) return new ApiError(409, "sync_running", err.message);
   if (err instanceof LedgerNotReadyError) return new ApiError(409, "ledger_not_ready", err.message);
   if (err instanceof TwoFiatAuthError) return new ApiError(422, "token_rejected", "2fiat rejected the token");

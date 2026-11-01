@@ -10,12 +10,13 @@ import { type AppDeps, handleError, loadAccount, requireUser } from "./api/commo
 import { feeScheduleRoutes } from "./api/feeSchedules.ts";
 import { findingRoutes } from "./api/findings.ts";
 import { fxRoutes } from "./api/fx.ts";
+import { grantRoutes } from "./api/grants.ts";
 
 export type { AppDeps } from "./api/common.ts";
 
 /**
  * The HTTP API, under `/api`. Everything but `/health` and `/auth/login` needs a session, and everything under
- * `/accounts/:accountId` needs that account to be the user's.
+ * `/accounts/:accountId` needs a grant on that account or one of its cards.
  */
 export function createApp(deps: AppDeps) {
   return (
@@ -37,6 +38,7 @@ export function createApp(deps: AppDeps) {
       .route("/accounts/:accountId", findingRoutes(deps))
       .route("/accounts/:accountId", adjustmentRoutes(deps))
       .route("/accounts/:accountId", feeScheduleRoutes(deps))
+      .route("/accounts/:accountId", grantRoutes(deps))
   );
 }
 
