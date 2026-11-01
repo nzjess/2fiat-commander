@@ -11,7 +11,7 @@ import {
   sameMerchant,
   takesCategory,
 } from "../categories.ts";
-import { chunks } from "../db/db.ts";
+import { chunks, type Db } from "../db/db.ts";
 import {
   activities,
   activityAnnotations,
@@ -20,12 +20,13 @@ import {
   cards,
   categories,
   findings,
+  logicalCards,
   rawOrders,
   rawTransactions,
 } from "../db/schema.ts";
 import { daysBefore } from "../time.ts";
 import { type AccountEnv, ApiError, type AppDeps, idParam, invalid, notFound } from "./common.ts";
-import { anyRole, cardGuards, forbidden, requireAnyCard } from "./guards.ts";
+import { anyRole, cardGuards, forbidden, requireAnyCard, visibleCards } from "./guards.ts";
 
 type ActivityRow = typeof activities.$inferSelect;
 type Annotation = Pick<typeof activityAnnotations.$inferSelect, "categoryId" | "categoryRuleId" | "note">;
@@ -33,7 +34,27 @@ type Annotation = Pick<typeof activityAnnotations.$inferSelect, "categoryId" | "
 /** Kinds whose pending authorisation should post within days; older ones are stale, as reconcile reports them. */
 const STALE_KINDS = ["purchase", "refund"] as const;
 
-function activityDto(a: ActivityRow, annotation: Annotation | null, staleBefore: string) {
+/** The name of the logical card each activity's transfer went to or came from. Only its name, whoever is asking. */
+function counterpartNames(db: Db, rows: ActivityRow[]): ReadonlyMap<number, string> {
+  const ids = [...new Set(rows.flatMap((a) => (a.counterpartCardId === null ? [] : [a.counterpartCardId])))];
+  if (ids.length === 0) return new Map<number, string>();
+  return new Map(
+    db
+      .select({ id: cards.id, name: logicalCards.name })
+      .from(cards)
+      .innerJoin(logicalCards, eq(logicalCards.id, cards.logicalCardId))
+      .where(inArray(cards.id, ids))
+      .all()
+      .map((c) => [c.id, c.name] as const),
+  );
+}
+
+function activityDto(
+  a: ActivityRow,
+  annotation: Annotation | null,
+  staleBefore: string,
+  names: ReadonlyMap<number, string>,
+) {
   return {
     id: a.id,
     cardId: a.cardId,
@@ -51,6 +72,7 @@ function activityDto(a: ActivityRow, annotation: Annotation | null, staleBefore:
     postedDescription: a.postedDescription,
     transferId: a.transferId,
     counterpartCardId: a.counterpartCardId,
+    counterpartName: a.counterpartCardId === null ? null : (names.get(a.counterpartCardId) ?? null),
     flags: a.flags,
     /** Authorised more than `LOOKBACK_DAYS` ago and never posted. Computed now, never stored. */
     stale:
@@ -188,6 +210,7 @@ export function activityRoutes(deps: AppDeps) {
           .where(
             and(
               eq(activities.accountId, c.var.account.id),
+              visibleCards(db, c.var.access, activities.cardId),
               query.cardId === undefined ? undefined : eq(activities.cardId, query.cardId),
               query.logicalCardId === undefined
                 ? undefined
@@ -252,8 +275,14 @@ export function activityRoutes(deps: AppDeps) {
 
         const page = rows.slice(0, query.limit);
         const last = page.at(-1);
+        const names = counterpartNames(
+          db,
+          page.map((row) => row.activity),
+        );
         return c.json({
-          items: page.map(({ activity, ...annotation }) => activityDto(activity, annotation, staleBefore)),
+          items: page.map(({ activity, ...annotation }) =>
+            activityDto(activity, annotation, staleBefore, names),
+          ),
           nextCursor: rows.length > query.limit && last ? encodeCursor(last.activity) : null,
         });
       })
@@ -278,14 +307,27 @@ export function activityRoutes(deps: AppDeps) {
           }
           annotate(db, activity.id, changes);
           return c.json(
-            activityDto(activity, annotationOf(activity.id), daysBefore(now().toISOString(), LOOKBACK_DAYS)),
+            activityDto(
+              activity,
+              annotationOf(activity.id),
+              daysBefore(now().toISOString(), LOOKBACK_DAYS),
+              counterpartNames(db, [activity]),
+            ),
           );
         },
       )
       // The account's uncategorised spending from the same merchant as this activity: for setting its category on them too.
       .get("/activities/:activityId/same-merchant", onActivity("card.view"), (c) => {
         const activity = findActivity(idParam(c, "activityId", "activity"), c.var.account.id);
-        return c.json({ activityIds: sameMerchant(db, c.var.account.id, activity.description, activity.id) });
+        return c.json({
+          activityIds: sameMerchant(
+            db,
+            c.var.account.id,
+            activity.description,
+            activity.id,
+            visibleCards(db, c.var.access, activities.cardId),
+          ),
+        });
       })
       // Sets one category on many activities, keeping their notes.
       .post(
@@ -384,7 +426,12 @@ export function activityRoutes(deps: AppDeps) {
           .map((f) => f.id);
 
         return c.json({
-          ...activityDto(activity, annotationOf(id), daysBefore(now().toISOString(), LOOKBACK_DAYS)),
+          ...activityDto(
+            activity,
+            annotationOf(id),
+            daysBefore(now().toISOString(), LOOKBACK_DAYS),
+            counterpartNames(db, [activity]),
+          ),
           sources: { transactions, orders, adjustment },
           findingIds,
         });

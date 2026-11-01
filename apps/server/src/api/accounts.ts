@@ -2,7 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { and, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
-import { accountsOfUser } from "../access.ts";
+import { accountsOfUser, loadAccess } from "../access.ts";
 import {
   AccountArchivedError,
   assertNewToken,
@@ -31,26 +31,31 @@ const Token = z
   .trim()
   .regex(TOKEN_PATTERN, "not a 2fiat account token (the token1… part of the login link)");
 
-export function syncDto(s: SyncRow) {
+/**
+ * What a sync did covers the whole account, so only someone who sees every card gets its details. Anyone else gets
+ * its status and times, which is all a card's page needs.
+ */
+export function syncDto(s: SyncRow, seesAllCards: boolean) {
+  const detail = <T>(value: T) => (seesAllCards ? value : null);
   return {
     id: s.id,
     trigger: s.trigger,
     status: s.status,
     startedAt: s.startedAt,
     finishedAt: s.finishedAt,
-    failedStage: s.failedStage,
-    error: s.error,
-    rowsNew: s.rowsNew,
-    rowsUpdated: s.rowsUpdated,
-    rowsMissing: s.rowsMissing,
-    windowFrom: s.windowFrom,
-    windowTo: s.windowTo,
-    ordersFrom: s.ordersFrom,
-    normalizedFrom: s.normalizedFrom,
+    failedStage: detail(s.failedStage),
+    error: detail(s.error),
+    rowsNew: detail(s.rowsNew),
+    rowsUpdated: detail(s.rowsUpdated),
+    rowsMissing: detail(s.rowsMissing),
+    windowFrom: detail(s.windowFrom),
+    windowTo: detail(s.windowTo),
+    ordersFrom: detail(s.ordersFrom),
+    normalizedFrom: detail(s.normalizedFrom),
   };
 }
 
-function accountDto(db: Db, a: AccountRow) {
+function accountDto(db: Db, a: AccountRow, seesAllCards: boolean) {
   const lastSync = db
     .select()
     .from(syncs)
@@ -64,7 +69,7 @@ function accountDto(db: Db, a: AccountRow) {
     createdAt: a.createdAt,
     archivedAt: a.archivedAt,
     replacedByAccountId: a.replacedByAccountId,
-    lastSync: lastSync ? syncDto(lastSync) : null,
+    lastSync: lastSync ? syncDto(lastSync, seesAllCards) : null,
   };
 }
 
@@ -93,7 +98,13 @@ export function accountRoutes(deps: AppDeps) {
 
   return (
     new Hono<UserEnv>()
-      .get("/", (c) => c.json(accountsOfUser(db, c.var.user.id).map((a) => accountDto(db, a))))
+      .get("/", (c) =>
+        c.json(
+          accountsOfUser(db, c.var.user.id).map((a) =>
+            accountDto(db, a, loadAccess(db, a.id, c.var.user.id)?.seesAllCards ?? false),
+          ),
+        ),
+      )
       // Only checks the token with 2fiat: the first sync is up to the caller.
       .post("/", zValidator("json", z.object({ label: Label, token: Token }), invalid), async (c) => {
         const { label, token } = c.req.valid("json");
@@ -102,7 +113,7 @@ export function accountRoutes(deps: AppDeps) {
         const sid = await verifyToken(token, { session: deps.session, now: now() });
         const id = createAccount(db, secrets, { userId, label, token, sid });
         await pullCardsIfAble(deps, id);
-        return c.json(accountDto(db, getAccount(db, id)), 201);
+        return c.json(accountDto(db, getAccount(db, id), true), 201);
       })
   );
 }
@@ -114,7 +125,7 @@ export function accountScopedRoutes(deps: AppDeps) {
 
   return (
     new Hono<AccountEnv>()
-      .get("/", anyRole, (c) => c.json(accountDto(db, c.var.account)))
+      .get("/", anyRole, (c) => c.json(accountDto(db, c.var.account, c.var.access.seesAllCards)))
       .patch(
         "/",
         requireAccount("account.rename"),
@@ -124,7 +135,7 @@ export function accountScopedRoutes(deps: AppDeps) {
             .set({ label: c.req.valid("json").label })
             .where(eq(accounts.id, c.var.account.id))
             .run();
-          return c.json(accountDto(db, getAccount(db, c.var.account.id)));
+          return c.json(accountDto(db, getAccount(db, c.var.account.id), c.var.access.seesAllCards));
         },
       )
       // 2fiat replaced the account's token: the new token becomes a new account, and this one is archived.
@@ -140,13 +151,19 @@ export function accountScopedRoutes(deps: AppDeps) {
           const sid = await verifyToken(token, { session: deps.session, now: now() });
           const id = replaceAccount(db, secrets, account.id, { label, token, sid, now: now() });
           await pullCardsIfAble(deps, id);
-          return c.json(accountDto(db, getAccount(db, id)), 201);
+          return c.json(accountDto(db, getAccount(db, id), c.var.access.seesAllCards), 201);
         },
       )
       // Starts a sync (or joins the running one) and returns straight away: poll the sync for its outcome.
       .post("/syncs", requireAnyCard("card.sync"), (c) => {
         const { syncId } = runner.start(c.var.account.id, "manual");
-        return c.json(syncDto(db.select().from(syncs).where(eq(syncs.id, syncId)).get() as SyncRow), 202);
+        return c.json(
+          syncDto(
+            db.select().from(syncs).where(eq(syncs.id, syncId)).get() as SyncRow,
+            c.var.access.seesAllCards,
+          ),
+          202,
+        );
       })
       .get(
         "/syncs",
@@ -165,7 +182,7 @@ export function accountScopedRoutes(deps: AppDeps) {
               .orderBy(desc(syncs.id))
               .limit(c.req.valid("query").limit)
               .all()
-              .map(syncDto),
+              .map((s) => syncDto(s, c.var.access.seesAllCards)),
           ),
       )
       .get("/syncs/:syncId", anyRole, (c) => {
@@ -176,7 +193,7 @@ export function accountScopedRoutes(deps: AppDeps) {
           .where(and(eq(syncs.id, id), eq(syncs.accountId, c.var.account.id)))
           .get();
         if (!sync) throw notFound("sync");
-        return c.json(syncDto(sync));
+        return c.json(syncDto(sync, c.var.access.seesAllCards));
       })
   );
 }

@@ -3,6 +3,7 @@ import { dollarsToCents } from "@twofiat/client";
 import { and, asc, eq, gte, inArray, notExists, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
+import type { Access } from "../access.ts";
 import { balanceHistory } from "../balanceHistory.ts";
 import { cashFlow } from "../cashflow.ts";
 import type { Db, Executor } from "../db/db.ts";
@@ -16,7 +17,15 @@ import {
 } from "../db/schema.ts";
 import { reevaluate } from "../reevaluate.ts";
 import { type AccountEnv, ApiError, type AppDeps, idParam, invalid, notFound } from "./common.ts";
-import { anyRole, assertOnCard, cardGuards, forbidden, requireAccount } from "./guards.ts";
+import {
+  anyRole,
+  assertOnCard,
+  cardGuards,
+  forbidden,
+  requireAccount,
+  visibleCards,
+  visibleLogicalCards,
+} from "./guards.ts";
 
 type CardRow = typeof cards.$inferSelect;
 
@@ -142,8 +151,14 @@ function cardDtos(db: Db, rows: CardRow[]) {
   }));
 }
 
-function accountCards(db: Db, accountId: number) {
-  return db.select().from(cards).where(eq(cards.accountId, accountId)).orderBy(asc(cards.id)).all();
+/** The account's cards that the user can see. */
+function accountCards(db: Db, accountId: number, access: Access) {
+  return db
+    .select()
+    .from(cards)
+    .where(and(eq(cards.accountId, accountId), visibleLogicalCards(access, cards.logicalCardId)))
+    .orderBy(asc(cards.id))
+    .all();
 }
 
 function cardOf(db: Db, accountId: number, id: number): CardRow {
@@ -158,12 +173,12 @@ function cardOf(db: Db, accountId: number, id: number): CardRow {
 
 const cardDto = (db: Db, card: CardRow) => cardDtos(db, [card])[0];
 
-function logicalCardDtos(db: Db, accountId: number) {
-  const members = cardDtos(db, accountCards(db, accountId));
+function logicalCardDtos(db: Db, accountId: number, access: Access) {
+  const members = cardDtos(db, accountCards(db, accountId, access));
   return db
     .select()
     .from(logicalCards)
-    .where(eq(logicalCards.accountId, accountId))
+    .where(and(eq(logicalCards.accountId, accountId), visibleLogicalCards(access, logicalCards.id)))
     .orderBy(asc(logicalCards.id))
     .all()
     .map((l) => {
@@ -204,7 +219,7 @@ export function cardRoutes(deps: AppDeps) {
 
   return (
     new Hono<AccountEnv>()
-      .get("/cards", anyRole, (c) => c.json(cardDtos(db, accountCards(db, c.var.account.id))))
+      .get("/cards", anyRole, (c) => c.json(cardDtos(db, accountCards(db, c.var.account.id, c.var.access))))
       .get("/cards/:cardId", onCard("card.view"), (c) =>
         c.json(cardDto(db, cardOf(db, c.var.account.id, idParam(c, "cardId", "card")))),
       )
@@ -291,7 +306,7 @@ export function cardRoutes(deps: AppDeps) {
         reevaluate(db, accountId, now());
         return c.json(cardDto(db, card));
       })
-      .get("/logical-cards", anyRole, (c) => c.json(logicalCardDtos(db, c.var.account.id)))
+      .get("/logical-cards", anyRole, (c) => c.json(logicalCardDtos(db, c.var.account.id, c.var.access)))
       // Renames a logical card, or picks which of its physical cards is current.
       .patch(
         "/logical-cards/:logicalCardId",
@@ -332,7 +347,7 @@ export function cardRoutes(deps: AppDeps) {
               makeCurrent(q, card);
             }
           });
-          return c.json(logicalCardDtos(db, accountId).find((l) => l.id === id));
+          return c.json(logicalCardDtos(db, accountId, c.var.access).find((l) => l.id === id));
         },
       )
       // A logical card's running ledger balance, and what 2fiat reported along the way.
@@ -370,6 +385,7 @@ export function cardRoutes(deps: AppDeps) {
             .where(
               and(
                 eq(evaluations.accountId, c.var.account.id),
+                visibleCards(db, c.var.access, balanceSnapshots.cardId),
                 cardId === undefined ? undefined : eq(balanceSnapshots.cardId, cardId),
                 logicalCardId === undefined
                   ? undefined

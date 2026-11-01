@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Db } from "../db/db.ts";
@@ -7,7 +7,7 @@ import { cards, feeSchedules } from "../db/schema.ts";
 import { feeComparisons, suggestSchedule } from "../fees.ts";
 import { reevaluate } from "../reevaluate.ts";
 import { type AccountEnv, ApiError, type AppDeps, idParam, invalid, notFound } from "./common.ts";
-import { anyRole, cardGuards, requireAccount } from "./guards.ts";
+import { anyRole, cardGuards, requireAccount, visibleLogicalCards } from "./guards.ts";
 
 type ScheduleRow = typeof feeSchedules.$inferSelect;
 
@@ -107,6 +107,21 @@ export function feeScheduleRoutes(deps: AppDeps) {
               .where(
                 and(
                   eq(feeSchedules.accountId, c.var.account.id),
+                  // Without a whole-account grant, only the schedules of their cards' products.
+                  c.var.access.seesAllCards
+                    ? undefined
+                    : inArray(
+                        feeSchedules.product,
+                        db
+                          .select({ product: cards.product })
+                          .from(cards)
+                          .where(
+                            and(
+                              eq(cards.accountId, c.var.account.id),
+                              visibleLogicalCards(c.var.access, cards.logicalCardId),
+                            ),
+                          ),
+                      ),
                   product === undefined ? undefined : eq(feeSchedules.product, product),
                 ),
               )

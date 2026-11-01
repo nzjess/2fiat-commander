@@ -6,7 +6,7 @@ import type { Db } from "../db/db.ts";
 import { cards, findings } from "../db/schema.ts";
 import { SCOPED_KINDS } from "../findings.ts";
 import { type AccountEnv, type AppDeps, idParam, invalid, notFound } from "./common.ts";
-import { anyRole, cardGuards } from "./guards.ts";
+import { anyRole, cardGuards, visibleLogicalCards } from "./guards.ts";
 
 const asOf = (evaluationId: Column) =>
   sql<string | null>`(SELECT as_of FROM evaluations WHERE id = ${evaluationId})`;
@@ -84,6 +84,7 @@ export function findingRoutes(deps: AppDeps) {
             .where(
               and(
                 eq(cards.accountId, c.var.account.id),
+                visibleLogicalCards(c.var.access, cards.logicalCardId),
                 status === "open"
                   ? and(isNull(findings.resolvedEvaluationId), isNull(findings.explanation))
                   : undefined,

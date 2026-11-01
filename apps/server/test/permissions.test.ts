@@ -1,4 +1,4 @@
-import { CARD_A, CARD_B, card } from "@twofiat/client/fixtures";
+import { authorization, CARD_A, CARD_B, card, topupRow, withdraw } from "@twofiat/client/fixtures";
 import { and, eq, isNull } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { createAccount } from "../src/accounts.ts";
@@ -16,6 +16,7 @@ import {
   feeSchedules,
   findings,
   grants,
+  logicalCards,
 } from "../src/db/schema.ts";
 import { reevaluate } from "../src/reevaluate.ts";
 import { Secrets } from "../src/secrets.ts";
@@ -35,7 +36,22 @@ async function world() {
   const rows = scenario();
   const twofiat = fake2fiat({
     cards: [card({ id: CARD_A, balance: 12.5 }), card({ id: CARD_B, balance: 100 })],
-    transactions: [rows.authA, rows.feeA, rows.postA, rows.authB, rows.postB],
+    transactions: [
+      rows.authA,
+      rows.feeA,
+      rows.postA,
+      rows.authB,
+      rows.postB,
+      // The same merchant as card A's purchase, and a transfer from A to B.
+      authorization({
+        card: CARD_B,
+        at: "2026-10-13T08:00:00.000Z",
+        amount: "-7.00",
+        description: "SHOP SPRINGFIELD USA",
+      }),
+      withdraw({ card: CARD_A, at: "2026-10-18T09:00:00.000Z", amount: "1.00" }),
+      topupRow({ card: CARD_B, at: "2026-10-18T09:00:01.000Z", amount: "+1.00" }),
+    ],
     orders: [rows.issue],
   });
   twofiat.state.validTokens = [TOKEN, NEW_TOKEN];
@@ -144,6 +160,7 @@ async function world() {
     app,
     accountId,
     request,
+    cookies,
     a,
     b,
     category,
@@ -561,3 +578,196 @@ function createdMember(w: World): number {
   if (!grant) throw new Error("no member");
   return grant.userId;
 }
+
+describe("what a user with a grant on one card gets from account-wide routes", () => {
+  const json = async <T>(res: Response) => {
+    expect(res.status).toBe(200);
+    return (await res.json()) as T;
+  };
+  type WithCard = { cardId: number };
+
+  describe.each(["cardManager", "cardMember"] as const)("as %s", (role) => {
+    test("cards and logical cards are only theirs", async () => {
+      const w = await world();
+      const list = await json<{ id: number }[]>(await w.request(role, "GET", "/cards"));
+      expect(list.map((c) => c.id)).toEqual([w.a.id]);
+      const logical = await json<{ id: number; cardIds: number[] }[]>(
+        await w.request(role, "GET", "/logical-cards"),
+      );
+      expect(logical).toMatchObject([{ id: w.a.logicalCardId, cardIds: [w.a.id] }]);
+    });
+
+    test.each(["/activities?limit=100", "/adjustments", "/snapshots"])(
+      "%s only holds their card's rows",
+      async (path) => {
+        const w = await world();
+        const body = await json<WithCard[] | { items: WithCard[] }>(await w.request(role, "GET", path));
+        const rows = Array.isArray(body) ? body : body.items;
+        expect(rows.length).toBeGreaterThan(0);
+        expect(new Set(rows.map((r) => r.cardId))).toEqual(new Set([w.a.id]));
+      },
+    );
+
+    test("findings are only their card's, whichever status they ask for", async () => {
+      const w = await world();
+      const rows = await json<{ id: number }[]>(await w.request(role, "GET", "/findings?status=all"));
+      expect(rows.map((f) => f.id)).toContain(w.findingA);
+      expect(rows.map((f) => f.id)).not.toContain(w.findingB);
+    });
+
+    test.each([
+      (w: World) => `/activities?cardId=${w.b.id}`,
+      (w: World) => `/activities?logicalCardId=${w.b.logicalCardId}`,
+      (w: World) => `/activities?findingId=${w.findingB}`,
+    ])("asking for the other card's activities finds nothing (%#)", async (path) => {
+      const w = await world();
+      const body = await json<{ items: unknown[] }>(await w.request(role, "GET", path(w)));
+      expect(body.items).toEqual([]);
+    });
+
+    test.each([
+      (w: World) => `/adjustments?cardId=${w.b.id}`,
+      (w: World) => `/adjustments?logicalCardId=${w.b.logicalCardId}`,
+      (w: World) => `/snapshots?cardId=${w.b.id}`,
+      (w: World) => `/snapshots?logicalCardId=${w.b.logicalCardId}`,
+      (w: World) => `/findings?status=all&cardId=${w.b.id}`,
+      (w: World) => `/findings?status=all&logicalCardId=${w.b.logicalCardId}`,
+    ])("asking for the other card's rows finds nothing (%#)", async (path) => {
+      const w = await world();
+      expect(await json<unknown[]>(await w.request(role, "GET", path(w)))).toEqual([]);
+    });
+
+    test("searching doesn't reach the other card", async () => {
+      const w = await world();
+      const body = await json<{ items: unknown[] }>(await w.request(role, "GET", "/activities?q=cafe"));
+      expect(body.items).toEqual([]);
+    });
+
+    test("the same-merchant lookup stays on their card", async () => {
+      const w = await world();
+      const path = `/activities/${w.activityA}/same-merchant`;
+      const theirs = await json<{ activityIds: number[] }>(await w.request(role, "GET", path));
+      const everyone = await json<{ activityIds: number[] }>(await w.request("owner", "GET", path));
+      expect(everyone.activityIds.length).toBeGreaterThan(0);
+      expect(theirs.activityIds).toEqual([]);
+    });
+
+    test("categories have names and colours, but no account-wide counts", async () => {
+      const w = await world();
+      const list = await json<object[]>(await w.request(role, "GET", "/categories"));
+      expect(list).toEqual([
+        expect.objectContaining({ name: "Groceries", activityCount: null, ruleCount: null }),
+      ]);
+    });
+
+    test("fee schedules are only for their cards' products", async () => {
+      const w = await world();
+      w.db.update(cards).set({ product: "other" }).where(eq(cards.id, w.b.id)).run();
+      w.db
+        .insert(feeSchedules)
+        .values({
+          accountId: w.accountId,
+          product: "other",
+          kind: "topup",
+          rateBps: 100,
+          effectiveFrom: "2026-01-01T00:00:00.000Z",
+          note: "theirs",
+        })
+        .run();
+      const list = await json<{ id: number }[]>(await w.request(role, "GET", "/fee-schedules"));
+      expect(list.map((s) => s.id)).toEqual([w.schedule]);
+    });
+
+    test("a sync shows its status and times, without what it did", async () => {
+      const w = await world();
+      const hidden = {
+        failedStage: null,
+        error: null,
+        rowsNew: null,
+        rowsUpdated: null,
+        rowsMissing: null,
+        windowFrom: null,
+        windowTo: null,
+        ordersFrom: null,
+        normalizedFrom: null,
+      };
+      const list = await json<object[]>(await w.request(role, "GET", "/syncs"));
+      expect(list[0]).toMatchObject({ status: "ok", ...hidden });
+      expect(await json<object>(await w.request(role, "GET", "/syncs/1"))).toMatchObject(hidden);
+      const account = await json<{ lastSync: object }>(await w.request(role, "GET", ""));
+      expect(account.lastSync).toMatchObject(hidden);
+
+      const accounts = await w.app.request("/api/accounts", {
+        headers: { origin: "http://localhost", cookie: w.cookies[role] ?? "" },
+      });
+      expect(await json<{ lastSync: object }[]>(accounts)).toMatchObject([{ lastSync: hidden }]);
+    });
+
+    test("a transfer names the other card, and nothing else about it", async () => {
+      const w = await world();
+      w.db.update(logicalCards).set({ name: "Family" }).where(eq(logicalCards.id, w.b.logicalCardId)).run();
+      const body = await json<{ items: object[] }>(
+        await w.request(role, "GET", "/activities?kind=transfer_out"),
+      );
+      expect(body.items).toEqual([expect.objectContaining({ counterpartName: "Family" })]);
+      const detail = (
+        await json<{ items: { id: number }[] }>(await w.request(role, "GET", "/activities?kind=transfer_out"))
+      ).items[0];
+      const shown = JSON.stringify(
+        await json<object>(await w.request(role, "GET", `/activities/${detail?.id}`)),
+      );
+      expect(shown).not.toContain(w.b.maskedNumber);
+      expect(shown).not.toContain(w.b.twofiatId);
+    });
+  });
+
+  test.each(["owner", "manager", "member"] as const)(
+    "a %s gets the whole account, with all its details",
+    async (role) => {
+      const w = await world();
+      const list = await json<{ id: number }[]>(await w.request(role, "GET", "/cards"));
+      expect(list.map((c) => c.id).toSorted()).toEqual([w.a.id, w.b.id].toSorted());
+      const rows = await json<{ id: number }[]>(await w.request(role, "GET", "/findings?status=all"));
+      expect(rows.map((f) => f.id)).toEqual(expect.arrayContaining([w.findingA, w.findingB]));
+      const categories = await json<object[]>(await w.request(role, "GET", "/categories"));
+      expect(categories).toEqual([expect.objectContaining({ activityCount: 0, ruleCount: 1 })]);
+      const syncList = await json<{ rowsNew: number | null }[]>(await w.request(role, "GET", "/syncs"));
+      expect(syncList[0]?.rowsNew).toBeGreaterThan(0);
+    },
+  );
+
+  test("an account member who manages one card still gets the whole account", async () => {
+    const w = await world();
+    w.db
+      .insert(grants)
+      .values({
+        accountId: w.accountId,
+        logicalCardId: w.a.logicalCardId,
+        userId: createdMember(w),
+        role: "manager",
+      })
+      .run();
+    const list = await json<unknown[]>(await w.request("member", "GET", "/logical-cards"));
+    expect(list).toHaveLength(2);
+  });
+
+  test("grants on two cards show both", async () => {
+    const w = await world();
+    const cardManager = w.db
+      .select()
+      .from(grants)
+      .where(and(eq(grants.logicalCardId, w.a.logicalCardId), eq(grants.role, "manager")))
+      .get();
+    w.db
+      .insert(grants)
+      .values({
+        accountId: w.accountId,
+        logicalCardId: w.b.logicalCardId,
+        userId: cardManager?.userId as number,
+        role: "member",
+      })
+      .run();
+    const list = await json<{ id: number }[]>(await w.request("cardManager", "GET", "/cards"));
+    expect(list.map((c) => c.id).toSorted()).toEqual([w.a.id, w.b.id].toSorted());
+  });
+});

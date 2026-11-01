@@ -104,7 +104,7 @@ function SyncStatus({ sync }: { sync: Sync | null }) {
 }
 
 function describeRows(sync: Sync) {
-  const parts = [`${sync.rowsNew} new`, `${sync.rowsUpdated} changed`];
-  if (sync.rowsMissing > 0) parts.push(`${sync.rowsMissing} missing`);
+  const parts = [`${sync.rowsNew ?? 0} new`, `${sync.rowsUpdated ?? 0} changed`];
+  if ((sync.rowsMissing ?? 0) > 0) parts.push(`${sync.rowsMissing} missing`);
   return `${parts.join(", ")} rows`;
 }

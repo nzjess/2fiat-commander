@@ -1,8 +1,10 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { NORMALIZER_VERSION } from "@twofiat/client";
 import { CARD_A, posting } from "@twofiat/client/fixtures";
 import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
-import { databasePath, loadConfig } from "../src/config.ts";
+import { databasePath, loadConfig, REPO_ROOT } from "../src/config.ts";
 import { activities, evaluations } from "../src/db/schema.ts";
 import { rebuildOutdated } from "../src/reevaluate.ts";
 import { setup } from "./setup.ts";
@@ -20,7 +22,8 @@ describe("loadConfig", () => {
     });
     // Relative to the repo root, wherever the process started.
     expect(config.databasePath).toBe(databasePath({}));
-    expect(config.databasePath).toMatch(/twofiat-commander\/data\/commander\.db$/);
+    expect(config.databasePath).toBe(join(REPO_ROOT, "data", "commander.db"));
+    expect(existsSync(join(REPO_ROOT, "pnpm-workspace.yaml"))).toBe(true);
   });
 
   test("reads and checks the env", () => {

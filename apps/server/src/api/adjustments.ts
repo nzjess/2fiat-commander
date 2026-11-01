@@ -13,7 +13,14 @@ import type { Db } from "../db/db.ts";
 import { adjustments, cards, rawOrders } from "../db/schema.ts";
 import { reevaluate } from "../reevaluate.ts";
 import { type AccountEnv, type AppDeps, idParam, invalid } from "./common.ts";
-import { anyRole, assertOnCard, cardGuards, logicalCardOfCard, requireAnyCard } from "./guards.ts";
+import {
+  anyRole,
+  assertOnCard,
+  cardGuards,
+  logicalCardOfCard,
+  requireAnyCard,
+  visibleCards,
+} from "./guards.ts";
 
 const Fields = z.object({
   cents: z
@@ -81,6 +88,7 @@ export function adjustmentRoutes(deps: AppDeps) {
               .where(
                 and(
                   eq(adjustments.accountId, c.var.account.id),
+                  visibleCards(db, c.var.access, adjustments.cardId),
                   cardId === undefined ? undefined : eq(adjustments.cardId, cardId),
                   logicalCardId === undefined
                     ? undefined

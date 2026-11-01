@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, type Column, eq, inArray } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import type { Access, AccountPermission, CardPermission } from "../access.ts";
 import type { Executor } from "../db/db.ts";
@@ -37,7 +37,26 @@ export function assertOnCard(
   if (!access.canOnCard(permission, logicalCardId)) throw forbidden();
 }
 
-/** Open to anyone with a role on the account. The handler must limit what it returns to the cards they can see. */
+/** Limits a query to the logical cards the user can see, given a logical card id column. */
+export const visibleLogicalCards = (access: Access, logicalCardId: Column) =>
+  access.seesAllCards ? undefined : inArray(logicalCardId, [...access.grantedCardIds]);
+
+/** Limits a query to the cards the user can see, given a physical card id column. */
+export const visibleCards = (db: Executor, access: Access, cardId: Column) =>
+  access.seesAllCards
+    ? undefined
+    : inArray(
+        cardId,
+        db
+          .select({ id: cards.id })
+          .from(cards)
+          .where(inArray(cards.logicalCardId, [...access.grantedCardIds])),
+      );
+
+/**
+ * Open to anyone with a grant on the account. The handler must limit what it returns to the cards they can see, with
+ * `visibleCards` or `visibleLogicalCards`.
+ */
 export const anyRole: Guard = guard(() => {});
 
 /** Needs a permission only an account role can grant. */

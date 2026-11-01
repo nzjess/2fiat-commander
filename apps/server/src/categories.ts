@@ -1,5 +1,5 @@
 import { merchantKey } from "@twofiat/client";
-import { and, asc, count, eq, gt, inArray, isNull, max, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, isNull, max, ne, or, type SQL, sql } from "drizzle-orm";
 import { chunks, type Db, type Executor, IMMEDIATE } from "./db/db.ts";
 import { activities, activityAnnotations, categories, categoryRules } from "./db/schema.ts";
 
@@ -180,7 +180,14 @@ export function categorize(db: Db, activityIds: number[], categoryId: number): v
  * The account's uncategorised spending (`CATEGORY_KINDS`) from the same merchant as the description (see
  * `merchantKey`), newest first, leaving out `exceptId`.
  */
-export function sameMerchant(db: Db, accountId: number, description: string, exceptId?: number) {
+export function sameMerchant(
+  db: Db,
+  accountId: number,
+  description: string,
+  exceptId?: number,
+  /** A further limit on the activities, such as to the cards a user can see. */
+  only?: SQL,
+) {
   const key = merchantKey(description);
   if (!key) return [];
   return db
@@ -193,6 +200,7 @@ export function sameMerchant(db: Db, accountId: number, description: string, exc
         inArray(activities.kind, [...CATEGORY_KINDS]),
         or(isNull(activityAnnotations.activityId), isNull(activityAnnotations.categoryId)),
         exceptId === undefined ? undefined : ne(activities.id, exceptId),
+        only,
       ),
     )
     .orderBy(sql`${activities.occurredAt} DESC`, sql`${activities.id} DESC`)

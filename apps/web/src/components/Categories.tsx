@@ -393,7 +393,10 @@ function CategoryRow({
     mutationFn: () => send(categoriesApi[":categoryId"].$delete({ param })),
     onSuccess: onChanged,
   });
-  const uses = `${category.activityCount} ${category.activityCount === 1 ? "activity" : "activities"}`;
+  // Only null for someone who can't see every card, who doesn't get this page.
+  const activityCount = category.activityCount ?? 0;
+  const ruleCount = category.ruleCount ?? 0;
+  const uses = `${activityCount} ${activityCount === 1 ? "activity" : "activities"}`;
 
   return (
     <Stack gap={4}>
@@ -467,11 +470,11 @@ function CategoryRow({
         <Paper withBorder p="xs" radius="md">
           <Text size="sm">
             Delete {category.name}?{" "}
-            {category.activityCount > 0
-              ? `Its ${uses} ${category.activityCount === 1 ? "becomes uncategorised, keeping its note" : "become uncategorised, keeping their notes"}`
+            {activityCount > 0
+              ? `Its ${uses} ${activityCount === 1 ? "becomes uncategorised, keeping its note" : "become uncategorised, keeping their notes"}`
               : "It isn't on any activity"}
-            {category.ruleCount > 0 &&
-              `, and ${category.ruleCount === 1 ? "the rule that sets it is" : `the ${category.ruleCount} rules that set it are`} deleted too`}
+            {ruleCount > 0 &&
+              `, and ${ruleCount === 1 ? "the rule that sets it is" : `the ${ruleCount} rules that set it are`} deleted too`}
             .
           </Text>
           <Group gap="xs" mt="xs">

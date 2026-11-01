@@ -181,7 +181,16 @@ export function categoryRoutes(deps: AppDeps) {
         },
       )
       // By name, each with how many activities it's on.
-      .get("/categories", anyRole, (c) => c.json(listCategories(db, c.var.account.id)))
+      .get("/categories", anyRole, (c) =>
+        c.json(
+          listCategories(db, c.var.account.id).map(({ activityCount, ruleCount, ...category }) => ({
+            ...category,
+            // They count across the whole account, so only someone who sees every card gets them.
+            activityCount: c.var.access.seesAllCards ? activityCount : null,
+            ruleCount: c.var.access.seesAllCards ? ruleCount : null,
+          })),
+        ),
+      )
       // Without a colour, it takes the palette's least-used one.
       .post(
         "/categories",
