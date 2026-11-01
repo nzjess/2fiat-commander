@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "54d0c506-17f2-4760-8203-511c855ca20e",
+  "id": "73eb2415-e15d-4641-9e81-390efa0a5fce",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "accounts": {
@@ -13,13 +13,6 @@
           "primaryKey": true,
           "notNull": true,
           "autoincrement": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
         },
         "label": {
           "name": "label",
@@ -86,22 +79,13 @@
         }
       },
       "indexes": {
-        "accounts_user_token": {
-          "name": "accounts_user_token",
-          "columns": ["user_id", "token_hash"],
+        "accounts_token_hash_unique": {
+          "name": "accounts_token_hash_unique",
+          "columns": ["token_hash"],
           "isUnique": true
         }
       },
       "foreignKeys": {
-        "accounts_user_id_users_id_fk": {
-          "name": "accounts_user_id_users_id_fk",
-          "tableFrom": "accounts",
-          "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "accounts_replaced_by_account_id_accounts_id_fk": {
           "name": "accounts_replaced_by_account_id_accounts_id_fk",
           "tableFrom": "accounts",
@@ -1447,6 +1431,109 @@
       },
       "uniqueConstraints": {},
       "checkConstraints": {}
+    },
+    "grants": {
+      "name": "grants",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "logical_card_id": {
+          "name": "logical_card_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "grants_one_on_account": {
+          "name": "grants_one_on_account",
+          "columns": ["user_id", "account_id"],
+          "isUnique": true,
+          "where": "logical_card_id IS NULL"
+        },
+        "grants_one_on_card": {
+          "name": "grants_one_on_card",
+          "columns": ["user_id", "logical_card_id"],
+          "isUnique": true,
+          "where": "logical_card_id IS NOT NULL"
+        },
+        "grants_user_account": {
+          "name": "grants_user_account",
+          "columns": ["user_id", "account_id"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "grants_user_id_users_id_fk": {
+          "name": "grants_user_id_users_id_fk",
+          "tableFrom": "grants",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "grants_account_id_accounts_id_fk": {
+          "name": "grants_account_id_accounts_id_fk",
+          "tableFrom": "grants",
+          "tableTo": "accounts",
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "grants_logical_card_id_account_id_logical_cards_id_account_id_fk": {
+          "name": "grants_logical_card_id_account_id_logical_cards_id_account_id_fk",
+          "tableFrom": "grants",
+          "tableTo": "logical_cards",
+          "columnsFrom": ["logical_card_id", "account_id"],
+          "columnsTo": ["id", "account_id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "grants_owner_on_account": {
+          "name": "grants_owner_on_account",
+          "value": "\"grants\".\"role\" <> 'owner' OR \"grants\".\"logical_card_id\" IS NULL"
+        }
+      }
     },
     "logical_cards": {
       "name": "logical_cards",

@@ -16,6 +16,7 @@ import {
 } from "../db/schema.ts";
 import { reevaluate } from "../reevaluate.ts";
 import { type AccountEnv, ApiError, type AppDeps, idParam, invalid, notFound } from "./common.ts";
+import { anyRole, assertOnCard, cardGuards, forbidden, requireAccount } from "./guards.ts";
 
 type CardRow = typeof cards.$inferSelect;
 
@@ -199,11 +200,12 @@ function logicalCardDtos(db: Db, accountId: number) {
 export function cardRoutes(deps: AppDeps) {
   const { db } = deps;
   const now = deps.now ?? (() => new Date());
+  const { onCard, onLogicalCard } = cardGuards(db);
 
   return (
     new Hono<AccountEnv>()
-      .get("/cards", (c) => c.json(cardDtos(db, accountCards(db, c.var.account.id))))
-      .get("/cards/:cardId", (c) =>
+      .get("/cards", anyRole, (c) => c.json(cardDtos(db, accountCards(db, c.var.account.id))))
+      .get("/cards/:cardId", onCard("card.view"), (c) =>
         c.json(cardDto(db, cardOf(db, c.var.account.id, idParam(c, "cardId", "card")))),
       )
       // Moves a physical card into another logical card (e.g. a replacement into its predecessor's), or with
@@ -212,6 +214,7 @@ export function cardRoutes(deps: AppDeps) {
       // left empty is deleted.
       .patch(
         "/cards/:cardId",
+        requireAccount("cards.link"),
         zValidator("json", z.object({ logicalCardId: z.number().int().positive().nullable() }), invalid),
         (c) => {
           const accountId = c.var.account.id;
@@ -261,6 +264,7 @@ export function cardRoutes(deps: AppDeps) {
       // Enters a card's opening balance and re-evaluates, without a sync.
       .put(
         "/cards/:cardId/opening-balance",
+        onCard("card.openingBalance"),
         zValidator("json", z.object({ cents: z.number().int().safe() }), invalid),
         (c) => {
           const accountId = c.var.account.id;
@@ -280,17 +284,18 @@ export function cardRoutes(deps: AppDeps) {
         },
       )
       // Drops a card's opening balance and re-evaluates, which infers it again if its history is incomplete.
-      .delete("/cards/:cardId/opening-balance", (c) => {
+      .delete("/cards/:cardId/opening-balance", onCard("card.openingBalance"), (c) => {
         const accountId = c.var.account.id;
         const card = cardOf(db, accountId, idParam(c, "cardId", "card"));
         db.delete(openingBalances).where(eq(openingBalances.cardId, card.id)).run();
         reevaluate(db, accountId, now());
         return c.json(cardDto(db, card));
       })
-      .get("/logical-cards", (c) => c.json(logicalCardDtos(db, c.var.account.id)))
+      .get("/logical-cards", anyRole, (c) => c.json(logicalCardDtos(db, c.var.account.id)))
       // Renames a logical card, or picks which of its physical cards is current.
       .patch(
         "/logical-cards/:logicalCardId",
+        onLogicalCard("card.view"),
         zValidator(
           "json",
           z
@@ -306,6 +311,8 @@ export function cardRoutes(deps: AppDeps) {
           const accountId = c.var.account.id;
           const id = idParam(c, "logicalCardId", "logical card");
           const { name, currentCardId } = c.req.valid("json");
+          if (name !== undefined && !c.var.access.can("cards.rename")) throw forbidden();
+          if (currentCardId !== undefined) assertOnCard(c.var.access, "card.setCurrent", id);
           db.transaction((q) => {
             const exists = q
               .select({ id: logicalCards.id })
@@ -329,13 +336,13 @@ export function cardRoutes(deps: AppDeps) {
         },
       )
       // A logical card's running ledger balance, and what 2fiat reported along the way.
-      .get("/logical-cards/:logicalCardId/balance-history", (c) => {
+      .get("/logical-cards/:logicalCardId/balance-history", onLogicalCard("card.view"), (c) => {
         const history = balanceHistory(db, c.var.account.id, idParam(c, "logicalCardId", "logical card"));
         if (!history) throw notFound("logical card");
         return c.json(history);
       })
       // A logical card's money in and out, for the cash flow chart.
-      .get("/logical-cards/:logicalCardId/cash-flow", (c) => {
+      .get("/logical-cards/:logicalCardId/cash-flow", onLogicalCard("card.view"), (c) => {
         const flows = cashFlow(db, c.var.account.id, idParam(c, "logicalCardId", "logical card"));
         if (!flows) throw notFound("logical card");
         return c.json({ activities: flows });
@@ -343,6 +350,7 @@ export function cardRoutes(deps: AppDeps) {
       // Each card's balances at every evaluation, oldest first: when a gap appeared, and how it moved.
       .get(
         "/snapshots",
+        anyRole,
         zValidator(
           "query",
           z.object({

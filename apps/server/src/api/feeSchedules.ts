@@ -7,6 +7,7 @@ import { cards, feeSchedules } from "../db/schema.ts";
 import { feeComparisons, suggestSchedule } from "../fees.ts";
 import { reevaluate } from "../reevaluate.ts";
 import { type AccountEnv, ApiError, type AppDeps, idParam, invalid, notFound } from "./common.ts";
+import { anyRole, cardGuards, requireAccount } from "./guards.ts";
 
 type ScheduleRow = typeof feeSchedules.$inferSelect;
 
@@ -88,12 +89,14 @@ function assertFreeStart(
 export function feeScheduleRoutes(deps: AppDeps) {
   const { db } = deps;
   const now = deps.now ?? (() => new Date());
+  const { onLogicalCard } = cardGuards(db);
 
   return (
     new Hono<AccountEnv>()
       // By product, kind and start.
       .get(
         "/fee-schedules",
+        anyRole,
         zValidator("query", z.object({ product: z.string().min(1).optional() }), invalid),
         (c) => {
           const { product } = c.req.valid("query");
@@ -116,6 +119,7 @@ export function feeScheduleRoutes(deps: AppDeps) {
       // What to accept for a card's product, from what 2fiat has charged.
       .get(
         "/fee-schedules/suggestion",
+        requireAccount("fees.edit"),
         zValidator(
           "query",
           z.object({ cardId: z.coerce.number().int().positive(), kind: z.enum(["topup", "transaction"]) }),
@@ -134,7 +138,7 @@ export function feeScheduleRoutes(deps: AppDeps) {
           return c.json(suggestion);
         },
       )
-      .post("/fee-schedules", zValidator("json", Create, invalid), (c) => {
+      .post("/fee-schedules", requireAccount("fees.edit"), zValidator("json", Create, invalid), (c) => {
         const input = c.req.valid("json");
         const accountId = c.var.account.id;
         const product = db
@@ -152,28 +156,33 @@ export function feeScheduleRoutes(deps: AppDeps) {
         reevaluate(db, accountId, now());
         return c.json(scheduleDto(schedule), 201);
       })
-      .patch("/fee-schedules/:scheduleId", zValidator("json", Update, invalid), (c) => {
-        const accountId = c.var.account.id;
-        const existing = findSchedule(db, accountId, idParam(c, "scheduleId", "fee schedule"));
-        const changes = c.req.valid("json");
-        const wrongKind =
-          existing.kind === "topup"
-            ? changes.authorizationFeeCents !== undefined || changes.postingFeeCents !== undefined
-            : changes.rateBps !== undefined;
-        if (wrongKind) {
-          throw new ApiError(400, "invalid_request", `a ${existing.kind} schedule has no such value`);
-        }
-        assertFreeStart(db, accountId, { ...existing, ...changes }, existing.id);
-        const schedule = db
-          .update(feeSchedules)
-          .set({ ...changes, updatedAt: now().toISOString() })
-          .where(eq(feeSchedules.id, existing.id))
-          .returning()
-          .get();
-        reevaluate(db, accountId, now());
-        return c.json(scheduleDto(schedule));
-      })
-      .delete("/fee-schedules/:scheduleId", (c) => {
+      .patch(
+        "/fee-schedules/:scheduleId",
+        requireAccount("fees.edit"),
+        zValidator("json", Update, invalid),
+        (c) => {
+          const accountId = c.var.account.id;
+          const existing = findSchedule(db, accountId, idParam(c, "scheduleId", "fee schedule"));
+          const changes = c.req.valid("json");
+          const wrongKind =
+            existing.kind === "topup"
+              ? changes.authorizationFeeCents !== undefined || changes.postingFeeCents !== undefined
+              : changes.rateBps !== undefined;
+          if (wrongKind) {
+            throw new ApiError(400, "invalid_request", `a ${existing.kind} schedule has no such value`);
+          }
+          assertFreeStart(db, accountId, { ...existing, ...changes }, existing.id);
+          const schedule = db
+            .update(feeSchedules)
+            .set({ ...changes, updatedAt: now().toISOString() })
+            .where(eq(feeSchedules.id, existing.id))
+            .returning()
+            .get();
+          reevaluate(db, accountId, now());
+          return c.json(scheduleDto(schedule));
+        },
+      )
+      .delete("/fee-schedules/:scheduleId", requireAccount("fees.edit"), (c) => {
         const accountId = c.var.account.id;
         const existing = findSchedule(db, accountId, idParam(c, "scheduleId", "fee schedule"));
         db.delete(feeSchedules).where(eq(feeSchedules.id, existing.id)).run();
@@ -181,7 +190,7 @@ export function feeScheduleRoutes(deps: AppDeps) {
         return c.body(null, 204);
       })
       // Each of a logical card's physical cards: its fees against the advert and the accepted schedules.
-      .get("/logical-cards/:logicalCardId/fees", (c) => {
+      .get("/logical-cards/:logicalCardId/fees", onLogicalCard("card.view"), (c) => {
         const result = feeComparisons(
           db,
           c.var.account.id,

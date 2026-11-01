@@ -1,8 +1,9 @@
 import { type SessionOptions, TwoFiatSession } from "@twofiat/client";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
+import { copyAccountGrantsIn } from "./access.ts";
 import { copyCategoriesIn } from "./categories.ts";
 import type { Db, Executor } from "./db/db.ts";
-import { accounts } from "./db/schema.ts";
+import { accounts, grants } from "./db/schema.ts";
 import type { Secrets } from "./secrets.ts";
 
 /** The `token1…` segment of an account's 2fiat login link. */
@@ -44,28 +45,26 @@ export async function verifyToken(
   return { sid, expiresAt: new Date((options.now ?? new Date()).getTime() + SID_TTL_MS).toISOString() };
 }
 
-/** Throws `DuplicateAccountError` if the user already has an account with this token. */
-export function assertNewToken(db: Executor, secrets: Secrets, userId: number, token: string): void {
+/** Throws `DuplicateAccountError` if any user has already added this token. */
+export function assertNewToken(db: Executor, secrets: Secrets, token: string): void {
   const existing = db
     .select({ id: accounts.id })
     .from(accounts)
-    .where(and(eq(accounts.userId, userId), eq(accounts.tokenHash, secrets.hash(token))))
+    .where(eq(accounts.tokenHash, secrets.hash(token)))
     .get();
   if (existing) throw new DuplicateAccountError();
 }
 
-/** Adds a 2fiat account for a user, with its token (and sid, if given) encrypted. A token added twice is refused. */
-export function createAccount(
+function insertAccount(
   db: Executor,
   secrets: Secrets,
-  input: { userId: number; label: string; token: string; sid?: VerifiedSid },
+  input: { label: string; token: string; sid?: VerifiedSid },
 ): number {
   if (!TOKEN_PATTERN.test(input.token)) throw new Error("not a 2fiat account token");
-  assertNewToken(db, secrets, input.userId, input.token);
+  assertNewToken(db, secrets, input.token);
   return db
     .insert(accounts)
     .values({
-      userId: input.userId,
       label: input.label,
       tokenEnc: secrets.encrypt(input.token),
       tokenHash: secrets.hash(input.token),
@@ -77,9 +76,25 @@ export function createAccount(
 }
 
 /**
+ * Adds a 2fiat account with the user as its owner, its token (and sid, if given) encrypted. A token added twice is
+ * refused.
+ */
+export function createAccount(
+  db: Executor,
+  secrets: Secrets,
+  input: { userId: number; label: string; token: string; sid?: VerifiedSid },
+): number {
+  return db.transaction((q) => {
+    const id = insertAccount(q, secrets, input);
+    q.insert(grants).values({ accountId: id, userId: input.userId, role: "owner" }).run();
+    return id;
+  });
+}
+
+/**
  * Replaces an account whose token 2fiat replaced: adds the new token as a new account and archives the old one,
  * dropping its token and sid. Accounts are hard boundaries, so nothing moves across, but the new account starts
- * with a copy of the old one's categories and rules. Returns the new account's id.
+ * with a copy of the old one's categories, rules and account grants. Returns the new account's id.
  */
 export function replaceAccount(
   db: Db,
@@ -91,12 +106,12 @@ export function replaceAccount(
     const old = q.select().from(accounts).where(eq(accounts.id, accountId)).get();
     if (!old) throw new Error(`No account ${accountId}`);
     if (old.archivedAt !== null) throw new AccountArchivedError(accountId);
-    const id = createAccount(q, secrets, {
-      userId: old.userId,
+    const id = insertAccount(q, secrets, {
       label: input.label ?? old.label,
       token: input.token,
       sid: input.sid,
     });
+    copyAccountGrantsIn(q, accountId, id);
     copyCategoriesIn(q, accountId, id);
     q.update(accounts)
       .set({

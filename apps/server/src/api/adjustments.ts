@@ -13,6 +13,7 @@ import type { Db } from "../db/db.ts";
 import { adjustments, cards, rawOrders } from "../db/schema.ts";
 import { reevaluate } from "../reevaluate.ts";
 import { type AccountEnv, type AppDeps, idParam, invalid } from "./common.ts";
+import { anyRole, assertOnCard, cardGuards, logicalCardOfCard, requireAnyCard } from "./guards.ts";
 
 const Fields = z.object({
   cents: z
@@ -54,12 +55,14 @@ function adjustmentDto(db: Db, a: AdjustmentRow) {
 export function adjustmentRoutes(deps: AppDeps) {
   const { db } = deps;
   const now = deps.now ?? (() => new Date());
+  const { onAdjustment } = cardGuards(db);
 
   return (
     new Hono<AccountEnv>()
       // Oldest first.
       .get(
         "/adjustments",
+        anyRole,
         zValidator(
           "query",
           z.object({
@@ -95,6 +98,7 @@ export function adjustmentRoutes(deps: AppDeps) {
       )
       .post(
         "/adjustments",
+        requireAnyCard("card.adjust"),
         zValidator(
           "json",
           Fields.extend({
@@ -107,6 +111,8 @@ export function adjustmentRoutes(deps: AppDeps) {
         (c) => {
           const { cardId, topupActivityId, ...input } = c.req.valid("json");
           const accountId = c.var.account.id;
+          const logicalCardId = logicalCardOfCard(db, accountId, cardId);
+          if (logicalCardId !== undefined) assertOnCard(c.var.access, "card.adjust", logicalCardId, "card");
           const adjustment = createAdjustment(db, accountId, cardId, input, { topupActivityId });
           reevaluate(db, accountId, now());
           return c.json(adjustmentDto(db, adjustment), 201);
@@ -114,6 +120,7 @@ export function adjustmentRoutes(deps: AppDeps) {
       )
       .patch(
         "/adjustments/:adjustmentId",
+        onAdjustment("card.adjust"),
         zValidator(
           "json",
           Fields.partial().refine((v) => Object.keys(v).length > 0, "nothing to change"),
@@ -127,7 +134,7 @@ export function adjustmentRoutes(deps: AppDeps) {
           return c.json(adjustmentDto(db, adjustment));
         },
       )
-      .delete("/adjustments/:adjustmentId", (c) => {
+      .delete("/adjustments/:adjustmentId", onAdjustment("card.adjust"), (c) => {
         const accountId = c.var.account.id;
         deleteAdjustment(db, accountId, idParam(c, "adjustmentId", "adjustment"));
         reevaluate(db, accountId, now());

@@ -1,10 +1,11 @@
 import type { SessionOptions } from "@twofiat/client";
 import { TwoFiatAuthError } from "@twofiat/client";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { Context, ErrorHandler, MiddlewareHandler } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { type Access, loadAccess } from "../access.ts";
 import { AccountArchivedError, DuplicateAccountError } from "../accounts.ts";
 import { AdjustmentNotFoundError } from "../adjustments.ts";
 import { resolveSession, SESSION_COOKIE, type SessionUser } from "../auth.ts";
@@ -26,7 +27,7 @@ export interface AppDeps {
 
 export type AccountRow = typeof accounts.$inferSelect;
 export type UserEnv = { Variables: { user: SessionUser } };
-export type AccountEnv = { Variables: { user: SessionUser; account: AccountRow } };
+export type AccountEnv = { Variables: { user: SessionUser; account: AccountRow; access: Access } };
 
 /** An error with a status and a machine-readable code, returned as `{ error, message }`. */
 export class ApiError extends Error {
@@ -117,17 +118,18 @@ export function requireUser(deps: AppDeps): MiddlewareHandler<UserEnv> {
   };
 }
 
-/** Loads the `:accountId` account, if it's the user's, and sets `account`. Someone else's is a 404 too. */
+/**
+ * Loads the `:accountId` account, if the user holds a role on it or one of its cards, and sets `account` and `access`.
+ * Access is worked out on each request, so a change of role applies straight away. Anyone else's is a 404 too.
+ */
 export function loadAccount(deps: AppDeps): MiddlewareHandler<AccountEnv> {
   return async (c, next) => {
     const id = idParam(c, "accountId", "account");
-    const account = deps.db
-      .select()
-      .from(accounts)
-      .where(and(eq(accounts.id, id), eq(accounts.userId, c.var.user.id)))
-      .get();
-    if (!account) throw notFound("account");
+    const account = deps.db.select().from(accounts).where(eq(accounts.id, id)).get();
+    const access = account && loadAccess(deps.db, id, c.var.user.id);
+    if (!account || !access) throw notFound("account");
     c.set("account", account);
+    c.set("access", access);
     await next();
   };
 }

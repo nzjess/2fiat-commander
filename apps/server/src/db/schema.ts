@@ -22,6 +22,7 @@ import {
   unique,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import type { Role } from "../access.ts";
 import type { CategoryColor, RuleMatch } from "../categories.ts";
 
 // Conventions: our own integer primary keys everywhere, 2fiat's ids in `twofiat_id` columns (unique per account).
@@ -70,34 +71,30 @@ export const sessions = sqliteTable(
 );
 
 /** One 2fiat secret token. */
-export const accounts = sqliteTable(
-  "accounts",
-  {
-    id: integer().primaryKey({ autoIncrement: true }),
-    userId: integer("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    label: text().notNull(),
-    /** Null once the account is archived. */
-    tokenEnc: text("token_enc"),
-    /** HMAC of the token: encryption uses a random IV, so this is what detects a token added twice. */
-    tokenHash: text("token_hash").notNull(),
-    sidEnc: text("sid_enc"),
-    sidExpiresAt: text("sid_expires_at"),
-    /**
-     * Raw rows from this time onwards may not be normalised yet: every raw row either belongs to an activity or is
-     * at or after it. Null when the ledger is up to date, "" when the whole ledger needs rebuilding.
-     */
-    ledgerDirtyFrom: text("ledger_dirty_from"),
-    /** An archived account stays viewable but never syncs again, e.g. after 2fiat replaced its token. */
-    archivedAt: text("archived_at"),
-    replacedByAccountId: integer("replaced_by_account_id").references((): AnySQLiteColumn => accounts.id, {
-      onDelete: "set null",
-    }),
-    createdAt: createdAt(),
-  },
-  (t) => [unique("accounts_user_token").on(t.userId, t.tokenHash)],
-);
+export const accounts = sqliteTable("accounts", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  label: text().notNull(),
+  /** Null once the account is archived. */
+  tokenEnc: text("token_enc"),
+  /**
+   * HMAC of the token: encryption uses a random IV, so this is what detects a token added twice. Unique across all
+   * users: one 2fiat account is one account here, and others join it as members.
+   */
+  tokenHash: text("token_hash").notNull().unique(),
+  sidEnc: text("sid_enc"),
+  sidExpiresAt: text("sid_expires_at"),
+  /**
+   * Raw rows from this time onwards may not be normalised yet: every raw row either belongs to an activity or is
+   * at or after it. Null when the ledger is up to date, "" when the whole ledger needs rebuilding.
+   */
+  ledgerDirtyFrom: text("ledger_dirty_from"),
+  /** An archived account stays viewable but never syncs again, e.g. after 2fiat replaced its token. */
+  archivedAt: text("archived_at"),
+  replacedByAccountId: integer("replaced_by_account_id").references((): AnySQLiteColumn => accounts.id, {
+    onDelete: "set null",
+  }),
+  createdAt: createdAt(),
+});
 
 /** What the user thinks of as "my card": one or more physical cards, e.g. a card and its replacement. */
 export const logicalCards = sqliteTable(
@@ -112,6 +109,39 @@ export const logicalCards = sqliteTable(
   },
   // The target of cards' composite foreign key, which keeps a card and its logical card in the same account.
   (t) => [unique("logical_cards_id_account").on(t.id, t.accountId)],
+);
+
+/**
+ * A user's role on the whole account (`logical_card_id` null) or on one of its logical cards. A user can hold one on
+ * the account and one on each card, and what they may do is the union. Roles are defined in `access.ts`, with no
+ * CHECK on their names: adding one needs no table rebuild, and one the code doesn't know grants nothing. Owner only
+ * means the whole account. An account can have several owners; the API keeps at least one.
+ */
+export const grants = sqliteTable(
+  "grants",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: integer("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    logicalCardId: integer("logical_card_id"),
+    role: text().$type<Role>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    // Keeps a card's grant in the card's account. A null logical_card_id isn't checked.
+    foreignKey({
+      columns: [t.logicalCardId, t.accountId],
+      foreignColumns: [logicalCards.id, logicalCards.accountId],
+    }).onDelete("cascade"),
+    uniqueIndex("grants_one_on_account").on(t.userId, t.accountId).where(sql`logical_card_id IS NULL`),
+    uniqueIndex("grants_one_on_card").on(t.userId, t.logicalCardId).where(sql`logical_card_id IS NOT NULL`),
+    index("grants_user_account").on(t.userId, t.accountId),
+    check("grants_owner_on_account", sql`${t.role} <> 'owner' OR ${t.logicalCardId} IS NULL`),
+  ],
 );
 
 /**

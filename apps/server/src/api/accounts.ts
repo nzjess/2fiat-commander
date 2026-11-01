@@ -2,6 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { and, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
+import { accountsOfUser } from "../access.ts";
 import {
   AccountArchivedError,
   assertNewToken,
@@ -22,6 +23,7 @@ import {
   notFound,
   type UserEnv,
 } from "./common.ts";
+import { anyRole, requireAccount, requireAnyCard } from "./guards.ts";
 
 const Label = z.string().trim().min(1).max(100);
 const Token = z
@@ -91,22 +93,12 @@ export function accountRoutes(deps: AppDeps) {
 
   return (
     new Hono<UserEnv>()
-      .get("/", (c) =>
-        c.json(
-          db
-            .select()
-            .from(accounts)
-            .where(eq(accounts.userId, c.var.user.id))
-            .orderBy(accounts.id)
-            .all()
-            .map((a) => accountDto(db, a)),
-        ),
-      )
+      .get("/", (c) => c.json(accountsOfUser(db, c.var.user.id).map((a) => accountDto(db, a))))
       // Only checks the token with 2fiat: the first sync is up to the caller.
       .post("/", zValidator("json", z.object({ label: Label, token: Token }), invalid), async (c) => {
         const { label, token } = c.req.valid("json");
         const userId = c.var.user.id;
-        assertNewToken(db, secrets, userId, token);
+        assertNewToken(db, secrets, token);
         const sid = await verifyToken(token, { session: deps.session, now: now() });
         const id = createAccount(db, secrets, { userId, label, token, sid });
         await pullCardsIfAble(deps, id);
@@ -122,23 +114,29 @@ export function accountScopedRoutes(deps: AppDeps) {
 
   return (
     new Hono<AccountEnv>()
-      .get("/", (c) => c.json(accountDto(db, c.var.account)))
-      .patch("/", zValidator("json", z.object({ label: Label }), invalid), (c) => {
-        db.update(accounts)
-          .set({ label: c.req.valid("json").label })
-          .where(eq(accounts.id, c.var.account.id))
-          .run();
-        return c.json(accountDto(db, getAccount(db, c.var.account.id)));
-      })
+      .get("/", anyRole, (c) => c.json(accountDto(db, c.var.account)))
+      .patch(
+        "/",
+        requireAccount("account.rename"),
+        zValidator("json", z.object({ label: Label }), invalid),
+        (c) => {
+          db.update(accounts)
+            .set({ label: c.req.valid("json").label })
+            .where(eq(accounts.id, c.var.account.id))
+            .run();
+          return c.json(accountDto(db, getAccount(db, c.var.account.id)));
+        },
+      )
       // 2fiat replaced the account's token: the new token becomes a new account, and this one is archived.
       .post(
         "/replacement",
+        requireAccount("account.replace"),
         zValidator("json", z.object({ label: Label.optional(), token: Token }), invalid),
         async (c) => {
           const { label, token } = c.req.valid("json");
           const account = c.var.account;
           if (account.archivedAt !== null) throw new AccountArchivedError(account.id);
-          assertNewToken(db, secrets, account.userId, token);
+          assertNewToken(db, secrets, token);
           const sid = await verifyToken(token, { session: deps.session, now: now() });
           const id = replaceAccount(db, secrets, account.id, { label, token, sid, now: now() });
           await pullCardsIfAble(deps, id);
@@ -146,12 +144,13 @@ export function accountScopedRoutes(deps: AppDeps) {
         },
       )
       // Starts a sync (or joins the running one) and returns straight away: poll the sync for its outcome.
-      .post("/syncs", (c) => {
+      .post("/syncs", requireAnyCard("card.sync"), (c) => {
         const { syncId } = runner.start(c.var.account.id, "manual");
         return c.json(syncDto(db.select().from(syncs).where(eq(syncs.id, syncId)).get() as SyncRow), 202);
       })
       .get(
         "/syncs",
+        anyRole,
         zValidator(
           "query",
           z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }),
@@ -169,7 +168,7 @@ export function accountScopedRoutes(deps: AppDeps) {
               .map(syncDto),
           ),
       )
-      .get("/syncs/:syncId", (c) => {
+      .get("/syncs/:syncId", anyRole, (c) => {
         const id = idParam(c, "syncId", "sync");
         const sync = db
           .select()

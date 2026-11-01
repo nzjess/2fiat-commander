@@ -25,6 +25,7 @@ import {
 } from "../db/schema.ts";
 import { daysBefore } from "../time.ts";
 import { type AccountEnv, ApiError, type AppDeps, idParam, invalid, notFound } from "./common.ts";
+import { anyRole, cardGuards, forbidden, requireAnyCard } from "./guards.ts";
 
 type ActivityRow = typeof activities.$inferSelect;
 type Annotation = Pick<typeof activityAnnotations.$inferSelect, "categoryId" | "categoryRuleId" | "note">;
@@ -157,10 +158,12 @@ export function activityRoutes(deps: AppDeps) {
   const notSpending = (a: ActivityRow) =>
     new ApiError(400, "invalid_request", `a ${a.kind} can't take a category, only spending can`);
 
+  const { onActivity } = cardGuards(db);
+
   return (
     new Hono<AccountEnv>()
       // Newest first, a page at a time: pass `nextCursor` back as `cursor` for the next page.
-      .get("/activities", zValidator("query", ListQuery, invalid), (c) => {
+      .get("/activities", anyRole, zValidator("query", ListQuery, invalid), (c) => {
         const query = c.req.valid("query");
         const staleBefore = daysBefore(now().toISOString(), LOOKBACK_DAYS);
         const isStale = and(
@@ -257,6 +260,7 @@ export function activityRoutes(deps: AppDeps) {
       // Sets what's given of an activity's category and note; null clears one. Any activity takes a note.
       .patch(
         "/activities/:activityId/annotation",
+        onActivity("card.annotate"),
         zValidator(
           "json",
           z.object({
@@ -279,13 +283,14 @@ export function activityRoutes(deps: AppDeps) {
         },
       )
       // The account's uncategorised spending from the same merchant as this activity: for setting its category on them too.
-      .get("/activities/:activityId/same-merchant", (c) => {
+      .get("/activities/:activityId/same-merchant", onActivity("card.view"), (c) => {
         const activity = findActivity(idParam(c, "activityId", "activity"), c.var.account.id);
         return c.json({ activityIds: sameMerchant(db, c.var.account.id, activity.description, activity.id) });
       })
       // Sets one category on many activities, keeping their notes.
       .post(
         "/activities/categorize",
+        requireAnyCard("card.annotate"),
         zValidator(
           "json",
           z.object({
@@ -298,23 +303,29 @@ export function activityRoutes(deps: AppDeps) {
           const { activityIds, categoryId } = c.req.valid("json");
           assertCategory(categoryId, c.var.account.id);
           const ids = [...new Set(activityIds)];
-          const found = [...chunks(ids)].flatMap((chunk) =>
-            db
-              .select()
-              .from(activities)
-              .where(and(eq(activities.accountId, c.var.account.id), inArray(activities.id, chunk)))
-              .all(),
-          );
+          const { access } = c.var;
+          // An activity on a card the user can't see reads the same as one that doesn't exist.
+          const found = [...chunks(ids)]
+            .flatMap((chunk) =>
+              db
+                .select({ activity: activities, logicalCardId: cards.logicalCardId })
+                .from(activities)
+                .innerJoin(cards, eq(cards.id, activities.cardId))
+                .where(and(eq(activities.accountId, c.var.account.id), inArray(activities.id, chunk)))
+                .all(),
+            )
+            .filter((a) => access.canOnCard("card.view", a.logicalCardId));
           if (found.length < ids.length)
             throw new ApiError(400, "invalid_request", "activityIds: no such activity");
-          const other = found.find((a) => !takesCategory(a.kind));
-          if (other) throw notSpending(other);
+          if (found.some((a) => !access.canOnCard("card.annotate", a.logicalCardId))) throw forbidden();
+          const other = found.find((a) => !takesCategory(a.activity.kind));
+          if (other) throw notSpending(other.activity);
           categorize(db, ids, categoryId);
           return c.json({ count: ids.length });
         },
       )
       // One activity, with 2fiat's original rows (or the user's adjustment) behind it and the findings that point at it.
-      .get("/activities/:activityId", (c) => {
+      .get("/activities/:activityId", onActivity("card.view"), (c) => {
         const id = idParam(c, "activityId", "activity");
         const activity = findActivity(id, c.var.account.id);
 

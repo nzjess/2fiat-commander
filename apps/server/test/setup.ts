@@ -8,6 +8,7 @@ import {
   activitySources,
   cards,
   evaluations,
+  grants,
   logicalCards,
   rawOrders,
   rawTransactions,
@@ -18,8 +19,11 @@ import {
 export function setup() {
   const db = openDb(":memory:");
   const userId = db.insert(users).values({ username: "u", passwordHash: "x" }).returning().get().id;
-  const addAccount = (label: string) =>
-    db.insert(accounts).values({ userId, label, tokenEnc: "x", tokenHash: label }).returning().get().id;
+  const addAccount = (label: string) => {
+    const id = db.insert(accounts).values({ label, tokenEnc: "x", tokenHash: label }).returning().get().id;
+    db.insert(grants).values({ accountId: id, userId, role: "owner" }).run();
+    return id;
+  };
   const accountId = addAccount("main");
 
   const addCard = (raw: RawCardDetails, account = accountId) => {

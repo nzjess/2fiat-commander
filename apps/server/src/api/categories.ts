@@ -23,6 +23,7 @@ import {
 } from "../categories.ts";
 import { categories, categoryRules } from "../db/schema.ts";
 import { type AccountEnv, ApiError, type AppDeps, idParam, invalid, notFound } from "./common.ts";
+import { anyRole, requireAccount } from "./guards.ts";
 
 const categoryDto = (c: CategoryRow, counts: { activityCount: number; ruleCount: number }) => ({
   id: c.id,
@@ -84,9 +85,12 @@ export function categoryRoutes(deps: AppDeps) {
   return (
     new Hono<AccountEnv>()
       // Category rules, in order, each with how many activities it set.
-      .get("/categories/rules", (c) => c.json(listRules(db, c.var.account.id)))
+      .get("/categories/rules", requireAccount("account.view"), (c) =>
+        c.json(listRules(db, c.var.account.id)),
+      )
       .post(
         "/categories/rules",
+        requireAccount("categories.manage"),
         zValidator(
           "json",
           z.object({ categoryId: z.number().int().positive(), match: Match, pattern: Pattern }),
@@ -105,6 +109,7 @@ export function categoryRoutes(deps: AppDeps) {
       // How much existing uncategorised spending a rule not yet saved would categorise.
       .get(
         "/categories/rules/preview",
+        requireAccount("account.view"),
         zValidator("query", z.object({ match: Match, pattern: Pattern }), invalid),
         (c) => {
           const { match, pattern: input } = c.req.valid("query");
@@ -117,6 +122,7 @@ export function categoryRoutes(deps: AppDeps) {
       // Each rule id once, in the new order.
       .put(
         "/categories/rules/order",
+        requireAccount("categories.manage"),
         zValidator("json", z.object({ ids: z.array(z.number().int().positive()) }), invalid),
         (c) => {
           if (!reorderRules(db, c.var.account.id, c.req.valid("json").ids))
@@ -124,18 +130,19 @@ export function categoryRoutes(deps: AppDeps) {
           return c.body(null, 204);
         },
       )
-      .get("/categories/rules/:ruleId/matches", (c) => {
+      .get("/categories/rules/:ruleId/matches", requireAccount("account.view"), (c) => {
         const rule = findRule(idParam(c, "ruleId", "rule"), c.var.account.id);
         return c.json({ count: ruleCandidates(db, c.var.account.id, rule).length });
       })
       // Sets the rule's category on the account's existing uncategorised spending that it matches.
-      .post("/categories/rules/:ruleId/apply", (c) => {
+      .post("/categories/rules/:ruleId/apply", requireAccount("categories.manage"), (c) => {
         const rule = findRule(idParam(c, "ruleId", "rule"), c.var.account.id);
         return c.json({ count: applyRule(db, rule) });
       })
       // With `move`, the activities the rule set follow it to a new category.
       .patch(
         "/categories/rules/:ruleId",
+        requireAccount("categories.manage"),
         zValidator(
           "json",
           z.object({
@@ -165,6 +172,7 @@ export function categoryRoutes(deps: AppDeps) {
       // With `clear=true`, the categories it set are cleared too; otherwise they stay.
       .delete(
         "/categories/rules/:ruleId",
+        requireAccount("categories.manage"),
         zValidator("query", z.object({ clear: z.enum(["true", "false"]).optional() }), invalid),
         (c) => {
           const rule = findRule(idParam(c, "ruleId", "rule"), c.var.account.id);
@@ -173,10 +181,11 @@ export function categoryRoutes(deps: AppDeps) {
         },
       )
       // By name, each with how many activities it's on.
-      .get("/categories", (c) => c.json(listCategories(db, c.var.account.id)))
+      .get("/categories", anyRole, (c) => c.json(listCategories(db, c.var.account.id)))
       // Without a colour, it takes the palette's least-used one.
       .post(
         "/categories",
+        requireAccount("categories.manage"),
         zValidator("json", z.object({ name: Name, color: Color.optional() }), invalid),
         (c) => {
           const { name, color } = c.req.valid("json");
@@ -191,6 +200,7 @@ export function categoryRoutes(deps: AppDeps) {
       )
       .patch(
         "/categories/:categoryId",
+        requireAccount("categories.manage"),
         zValidator("json", z.object({ name: Name.optional(), color: Color.optional() }), invalid),
         (c) => {
           const category = find(idParam(c, "categoryId", "category"), c.var.account.id);
@@ -199,7 +209,7 @@ export function categoryRoutes(deps: AppDeps) {
         },
       )
       // Its activities go back to uncategorised.
-      .delete("/categories/:categoryId", (c) => {
+      .delete("/categories/:categoryId", requireAccount("categories.manage"), (c) => {
         deleteCategory(db, find(idParam(c, "categoryId", "category"), c.var.account.id).id);
         return c.body(null, 204);
       })

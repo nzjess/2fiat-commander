@@ -6,6 +6,7 @@ import type { Db } from "../db/db.ts";
 import { cards, findings } from "../db/schema.ts";
 import { SCOPED_KINDS } from "../findings.ts";
 import { type AccountEnv, type AppDeps, idParam, invalid, notFound } from "./common.ts";
+import { anyRole, cardGuards } from "./guards.ts";
 
 const asOf = (evaluationId: Column) =>
   sql<string | null>`(SELECT as_of FROM evaluations WHERE id = ${evaluationId})`;
@@ -71,10 +72,12 @@ export function findingRoutes(deps: AppDeps) {
     return finding;
   };
 
+  const { onFinding } = cardGuards(db);
+
   return (
     new Hono<AccountEnv>()
       // Most recently seen first.
-      .get("/findings", zValidator("query", ListQuery, invalid), (c) => {
+      .get("/findings", anyRole, zValidator("query", ListQuery, invalid), (c) => {
         const { status, cardId, logicalCardId, kind } = c.req.valid("query");
         return c.json(
           selectFindings(db)
@@ -99,12 +102,13 @@ export function findingRoutes(deps: AppDeps) {
             .all(),
         );
       })
-      .get("/findings/:findingId", (c) =>
+      .get("/findings/:findingId", onFinding("card.view"), (c) =>
         c.json(findingOf(c.var.account.id, idParam(c, "findingId", "finding"))),
       )
       // Marks a finding explained, with the user's explanation, or with null not explained again.
       .patch(
         "/findings/:findingId",
+        onFinding("card.explain"),
         zValidator("json", z.object({ explanation: z.string().trim().min(1).max(2000).nullable() }), invalid),
         (c) => {
           const finding = findingOf(c.var.account.id, idParam(c, "findingId", "finding"));

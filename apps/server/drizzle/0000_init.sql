@@ -1,6 +1,5 @@
 CREATE TABLE `accounts` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`user_id` integer NOT NULL,
 	`label` text NOT NULL,
 	`token_enc` text,
 	`token_hash` text NOT NULL,
@@ -10,11 +9,10 @@ CREATE TABLE `accounts` (
 	`archived_at` text,
 	`replaced_by_account_id` integer,
 	`created_at` text NOT NULL,
-	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`replaced_by_account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `accounts_user_token` ON `accounts` (`user_id`,`token_hash`);--> statement-breakpoint
+CREATE UNIQUE INDEX `accounts_token_hash_unique` ON `accounts` (`token_hash`);--> statement-breakpoint
 CREATE TABLE `activities` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`account_id` integer NOT NULL,
@@ -221,6 +219,22 @@ CREATE TABLE `fx_rates` (
 	PRIMARY KEY(`currency`, `day`)
 );
 --> statement-breakpoint
+CREATE TABLE `grants` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`user_id` integer NOT NULL,
+	`account_id` integer NOT NULL,
+	`logical_card_id` integer,
+	`role` text NOT NULL,
+	`created_at` text NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`logical_card_id`,`account_id`) REFERENCES `logical_cards`(`id`,`account_id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "grants_owner_on_account" CHECK("grants"."role" <> 'owner' OR "grants"."logical_card_id" IS NULL)
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `grants_one_on_account` ON `grants` (`user_id`,`account_id`) WHERE logical_card_id IS NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `grants_one_on_card` ON `grants` (`user_id`,`logical_card_id`) WHERE logical_card_id IS NOT NULL;--> statement-breakpoint
+CREATE INDEX `grants_user_account` ON `grants` (`user_id`,`account_id`);--> statement-breakpoint
 CREATE TABLE `logical_cards` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`account_id` integer NOT NULL,
