@@ -5,6 +5,11 @@ import type { FindingsSearch } from "./lib/search.ts";
 // Keys: everything about an account sits under ["accounts", accountId], so one invalidation of ["accounts"]
 // refreshes it all after a sync. Account ids are numeric strings, so they never clash with "list".
 
+export const authOptionsQuery = queryOptions({
+  queryKey: ["auth-options"],
+  queryFn: () => ok(api.auth.options.$get()),
+});
+
 export const meQuery = queryOptions({
   queryKey: ["me"],
   queryFn: () => ok(api.auth.me.$get()),

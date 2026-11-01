@@ -235,6 +235,15 @@ CREATE TABLE `grants` (
 CREATE UNIQUE INDEX `grants_one_on_account` ON `grants` (`user_id`,`account_id`) WHERE logical_card_id IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `grants_one_on_card` ON `grants` (`user_id`,`logical_card_id`) WHERE logical_card_id IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `grants_user_account` ON `grants` (`user_id`,`account_id`);--> statement-breakpoint
+CREATE TABLE `invites` (
+	`user_id` integer PRIMARY KEY NOT NULL,
+	`token_hash` text NOT NULL,
+	`expires_at` text NOT NULL,
+	`created_at` text NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `invites_token_hash_unique` ON `invites` (`token_hash`);--> statement-breakpoint
 CREATE TABLE `logical_cards` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`account_id` integer NOT NULL,
@@ -319,9 +328,10 @@ CREATE UNIQUE INDEX `syncs_one_running` ON `syncs` (`account_id`) WHERE status =
 CREATE TABLE `users` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`username` text NOT NULL,
-	`password_hash` text NOT NULL,
+	`password_hash` text,
 	`display_currency` text DEFAULT 'USD' NOT NULL,
-	`created_at` text NOT NULL
+	`created_at` text NOT NULL,
+	CONSTRAINT "users_username_chars" CHECK(length(username) > 0 AND username NOT GLOB '*[^A-Za-z0-9._-]*')
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `users_username_unique` ON `users` (`username`);
+CREATE UNIQUE INDEX `users_username_nocase` ON `users` (username COLLATE NOCASE);

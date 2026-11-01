@@ -126,6 +126,19 @@ export function lastFour(maskedNumber: string): string {
 export const cardLabel = (card: Pick<Card, "alias" | "maskedNumber">) =>
   `${card.alias} ·· ${lastFour(card.maskedNumber)}`;
 
+/**
+ * A logical card in one line: its name and the last four digits of its current card, or of its first if none is
+ * current. Names needn't be unique, so this is what tells two apart. Just the name if it has no cards yet.
+ */
+export function logicalCardLabel(
+  logical: { name: string; cardIds: readonly number[]; currentCardId: number | null },
+  cards: readonly Pick<Card, "id" | "maskedNumber">[],
+): string {
+  const id = logical.currentCardId ?? logical.cardIds[0];
+  const card = cards.find((c) => c.id === id);
+  return card ? `${logical.name} ·· ${lastFour(card.maskedNumber)}` : logical.name;
+}
+
 /** 2fiat reports status "1" for an active card. */
 export const isActive = (card: Pick<Card, "status">) => card.status === null || card.status === "1";
 

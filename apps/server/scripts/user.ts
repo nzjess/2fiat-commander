@@ -1,16 +1,28 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { createUser, hashPassword, setPassword } from "../src/auth.ts";
+import {
+  createUser,
+  hashPassword,
+  MIN_PASSWORD_LENGTH,
+  setPassword,
+  USERNAME_PATTERN,
+  USERNAME_RULE,
+} from "../src/auth.ts";
 import { databasePath } from "../src/config.ts";
 import { openDb } from "../src/db/db.ts";
 
-// Users are only ever created here: the API has no signup.
+// For setting up a user by hand, and the only way to change a password.
 //   pnpm user:add <username>      pnpm user:passwd <username>
 
 const [command, username] = process.argv.slice(2);
 if ((command !== "add" && command !== "passwd") || !username) {
   console.error("usage: user.ts add|passwd <username>");
   process.exit(2);
+}
+
+if (command === "add" && !USERNAME_PATTERN.test(username)) {
+  console.error(`a username ${USERNAME_RULE}`);
+  process.exit(1);
 }
 
 /** Reads a line from the terminal without echoing it, or from stdin when it's piped. */
@@ -54,8 +66,8 @@ async function readPassword(prompt: string): Promise<string> {
 }
 
 const password = await readPassword("password: ");
-if (password.length < 12) {
-  console.error("the password must be at least 12 characters");
+if (password.length < MIN_PASSWORD_LENGTH) {
+  console.error(`the password must be at least ${MIN_PASSWORD_LENGTH} characters`);
   process.exit(1);
 }
 if (process.stdin.isTTY && (await readPassword("again: ")) !== password) {

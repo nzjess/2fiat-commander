@@ -39,7 +39,7 @@ if (config.backupDir) {
   console.log(`backing up daily to ${config.backupDir}`);
 }
 
-const api = createApp({ db, secrets, runner });
+const api = createApp({ db, secrets, runner, signupEnabled: config.signupEnabled });
 const app = config.webDist ? withWeb(api, config.webDist) : api;
 
 serve({ fetch: app.fetch, hostname: config.host, port: config.port }, (info) => {

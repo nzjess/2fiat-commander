@@ -35,14 +35,24 @@ const createdAt = () =>
     .notNull()
     .$defaultFn(() => now());
 
-export const users = sqliteTable("users", {
-  id: integer().primaryKey({ autoIncrement: true }),
-  username: text().notNull().unique(),
-  passwordHash: text("password_hash").notNull(),
-  /** The currency amounts are shown in: one of `CURRENCIES` in `fx.ts`. Display only; money is stored in USD. */
-  displayCurrency: text("display_currency").notNull().default("USD"),
-  createdAt: createdAt(),
-});
+export const users = sqliteTable(
+  "users",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    /** As first typed, but unique and matched ignoring case: compare it through `usernameIs` in `auth.ts`. */
+    username: text().notNull(),
+    /** Null for someone invited who hasn't set a password yet, who can't log in. */
+    passwordHash: text("password_hash"),
+    /** The currency amounts are shown in: one of `CURRENCIES` in `fx.ts`. Display only; money is stored in USD. */
+    displayCurrency: text("display_currency").notNull().default("USD"),
+    createdAt: createdAt(),
+  },
+  () => [
+    uniqueIndex("users_username_nocase").on(sql`username COLLATE NOCASE`),
+    // NOCASE only folds ASCII, so this is what makes matching ignore case for every name. See `USERNAME_PATTERN`.
+    check("users_username_chars", sql`length(username) > 0 AND username NOT GLOB '*[^A-Za-z0-9._-]*'`),
+  ],
+);
 
 /** The ECB's daily euro reference rates, mirrored from `FX_FROM` (see `fx.ts`). Working days only. */
 export const fxRates = sqliteTable(
@@ -69,6 +79,17 @@ export const sessions = sqliteTable(
   },
   (t) => [index("sessions_user").on(t.userId)],
 );
+
+/** The link that lets a user without a password set one: one per user, gone once used. */
+export const invites = sqliteTable("invites", {
+  userId: integer("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** SHA-256 of the token in the link, so a leaked database can't be used to accept an invite. */
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: createdAt(),
+});
 
 /** One 2fiat secret token. */
 export const accounts = sqliteTable("accounts", {

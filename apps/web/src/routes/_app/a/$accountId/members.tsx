@@ -1,11 +1,26 @@
-import { Alert, Button, Group, Paper, Select, Stack, Table, Text, TextInput, Title } from "@mantine/core";
+import {
+  Alert,
+  Badge,
+  Button,
+  CopyButton,
+  Divider,
+  Group,
+  Paper,
+  Select,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title,
+} from "@mantine/core";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { api, type Grant, ok, send } from "../../../../api.ts";
+import { useEffect, useRef, useState } from "react";
+import { ApiError, api, type Grant, ok, send } from "../../../../api.ts";
 import { useAccess } from "../../../../components/useAccess.ts";
-import { accessOf, type Role, roleLabel, roleOptions } from "../../../../lib/access.ts";
-import { accountQuery, grantsQuery, logicalCardsQuery, meQuery } from "../../../../queries.ts";
+import { accessOf, inviteLink, type Role, roleLabel, roleOptions } from "../../../../lib/access.ts";
+import { logicalCardLabel } from "../../../../lib/format.ts";
+import { accountQuery, cardsQuery, grantsQuery, logicalCardsQuery, meQuery } from "../../../../queries.ts";
 
 export const Route = createFileRoute("/_app/a/$accountId/members")({
   loader: async ({ context: { queryClient }, params: { accountId } }) => {
@@ -14,12 +29,67 @@ export const Route = createFileRoute("/_app/a/$accountId/members")({
     await Promise.all([
       queryClient.ensureQueryData(grantsQuery(accountId)),
       queryClient.ensureQueryData(logicalCardsQuery(accountId)),
+      queryClient.ensureQueryData(cardsQuery(accountId)),
     ]);
   },
   component: MembersPage,
 });
 
 const grantsApi = api.accounts[":accountId"].grants;
+const invitesApi = api.accounts[":accountId"].invites;
+
+/** The one link on show, in the row of the grant it was made from. The server can't show it again. */
+interface ShownLink {
+  grantId: number;
+  token: string;
+  expiresAt: string;
+}
+
+/** The link for someone invited, with what they need to know to share it. */
+function InviteLinkPanel({
+  username,
+  token,
+  expiresAt,
+}: {
+  username: string;
+  token: string;
+  expiresAt: string;
+}) {
+  const link = inviteLink(window.location.origin, token);
+  const panel = useRef<HTMLDivElement>(null);
+  // The button that made it can be far from the row it shows in.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: for each new link
+  useEffect(() => {
+    panel.current?.scrollIntoView({ block: "nearest" });
+  }, [token]);
+  return (
+    <Alert ref={panel} color="blue" variant="light" title={`Send this link to ${username}`}>
+      <Stack gap="xs">
+        <Text size="sm">
+          It lets whoever opens it first set the password for {username}, so share it somewhere private. It
+          works once, until {new Date(expiresAt).toLocaleDateString()}, and won't be shown again.
+        </Text>
+        <Group gap="xs" wrap="nowrap">
+          <TextInput
+            aria-label={`Invite link for ${username}`}
+            readOnly
+            size="xs"
+            flex={1}
+            value={link}
+            onFocus={(e) => e.currentTarget.select()}
+          />
+          <CopyButton value={link}>
+            {({ copied, copy }) => (
+              <Button size="xs" variant="light" onClick={copy}>
+                {copied ? "Copied" : "Copy"}
+              </Button>
+            )}
+          </CopyButton>
+        </Group>
+      </Stack>
+    </Alert>
+  );
+}
 
 function MembersPage() {
   const { accountId } = Route.useParams();
@@ -39,8 +109,15 @@ function MembersPage() {
 function Members({ accountId }: { accountId: string }) {
   const { data: grants } = useSuspenseQuery(grantsQuery(accountId));
   const { data: logicalCards } = useSuspenseQuery(logicalCardsQuery(accountId));
+  const { data: physicalCards } = useSuspenseQuery(cardsQuery(accountId));
+  const labelled = logicalCards.map((card) => ({
+    id: card.id,
+    name: logicalCardLabel(card, physicalCards),
+  }));
+  const [link, setLink] = useState<ShownLink | null>(null);
+  const tableProps = { accountId, link, onLink: setLink };
   const whole = grants.filter((g) => g.logicalCardId === null);
-  const cards = logicalCards
+  const cards = labelled
     .map((card) => ({ card, grants: grants.filter((g) => g.logicalCardId === card.id) }))
     .filter((c) => c.grants.length > 0);
   return (
@@ -50,26 +127,33 @@ function Members({ accountId }: { accountId: string }) {
         card. A person can have both, and can do whatever either role allows.
       </Text>
       <Stack gap="xs">
-        <Title order={4}>Whole account</Title>
-        <GrantTable accountId={accountId} grants={whole} />
+        <Title order={4}>Account</Title>
+        <GrantTable {...tableProps} grants={whole} />
       </Stack>
+      {cards.length > 0 && <Divider />}
       {cards.map(({ card, grants }) => (
         <Stack gap="xs" key={card.id}>
           <Title order={4}>{card.name}</Title>
-          <GrantTable accountId={accountId} grants={grants} />
+          <GrantTable {...tableProps} grants={grants} />
         </Stack>
       ))}
-      <AddMember accountId={accountId} cards={logicalCards.map((c) => ({ id: c.id, name: c.name }))} />
+      <AddMember accountId={accountId} cards={labelled} onLink={setLink} />
     </Stack>
   );
 }
 
-function GrantTable({ accountId, grants }: { accountId: string; grants: Grant[] }) {
+interface LinkProps {
+  accountId: string;
+  link: ShownLink | null;
+  onLink: (link: ShownLink) => void;
+}
+
+function GrantTable({ grants, ...props }: LinkProps & { grants: Grant[] }) {
   return (
     <Table layout="fixed">
       <Table.Tbody>
         {grants.map((g) => (
-          <GrantRow key={g.id} accountId={accountId} grant={g} />
+          <GrantRow key={g.id} {...props} grant={g} />
         ))}
       </Table.Tbody>
     </Table>
@@ -79,7 +163,7 @@ function GrantTable({ accountId, grants }: { accountId: string; grants: Grant[] 
 /** A change an owner is making to their own ownership, which they couldn't undo themselves. */
 type Pending = { kind: "demote"; role: Role } | { kind: "remove" };
 
-function GrantRow({ accountId, grant }: { accountId: string; grant: Grant }) {
+function GrantRow({ accountId, link, onLink, grant }: LinkProps & { grant: Grant }) {
   const queryClient = useQueryClient();
   const { data: me } = useQuery(meQuery);
   const [pending, setPending] = useState<Pending | null>(null);
@@ -97,14 +181,27 @@ function GrantRow({ accountId, grant }: { accountId: string; grant: Grant }) {
     mutationFn: () => send(grantsApi[":grantId"].$delete({ param })),
     onSuccess: done,
   });
+  const newLink = useMutation({
+    mutationFn: () => ok(invitesApi[":userId"].$post({ param: { accountId, userId: String(grant.userId) } })),
+    onSuccess: ({ token, expiresAt }) => onLink({ grantId: grant.id, token, expiresAt }),
+  });
   const onCard = grant.logicalCardId !== null;
   const ownOwnership = !onCard && grant.role === "owner" && grant.userId === me?.user.id;
-  const error = change.error ?? remove.error;
+  const error = change.error ?? remove.error ?? newLink.error;
 
   return (
     <>
       <Table.Tr>
-        <Table.Td>{grant.username}</Table.Td>
+        <Table.Td>
+          <Group gap="xs">
+            {grant.username}
+            {grant.pending && (
+              <Badge size="xs" variant="light" color="gray">
+                Invited
+              </Badge>
+            )}
+          </Group>
+        </Table.Td>
         <Table.Td>
           <Select
             aria-label={`${grant.username}'s role`}
@@ -123,7 +220,22 @@ function GrantRow({ accountId, grant }: { accountId: string; grant: Grant }) {
           />
         </Table.Td>
         <Table.Td>
-          <Group justify="flex-end">
+          <Group justify="flex-end" gap="xs">
+            {grant.canMakeLink && (
+              <Button
+                size="compact-xs"
+                variant="light"
+                loading={newLink.isPending}
+                onClick={() => newLink.mutate()}
+              >
+                New link
+              </Button>
+            )}
+            {grant.pending && !grant.canMakeLink && (
+              <Text size="xs" c="dimmed" flex={1}>
+                Invited to another account too, so only someone who owns both can make a new link.
+              </Text>
+            )}
             <Button
               size="compact-xs"
               variant="light"
@@ -136,6 +248,13 @@ function GrantRow({ accountId, grant }: { accountId: string; grant: Grant }) {
           </Group>
         </Table.Td>
       </Table.Tr>
+      {link?.grantId === grant.id && grant.pending && (
+        <Table.Tr>
+          <Table.Td colSpan={3}>
+            <InviteLinkPanel username={grant.username} token={link.token} expiresAt={link.expiresAt} />
+          </Table.Td>
+        </Table.Tr>
+      )}
       {(pending || error) && (
         <Table.Tr>
           <Table.Td colSpan={3}>
@@ -160,7 +279,16 @@ function GrantRow({ accountId, grant }: { accountId: string; grant: Grant }) {
                   >
                     {pending.kind === "demote" ? "Change my role" : "Remove me"}
                   </Button>
-                  <Button size="compact-xs" variant="light" color="gray" onClick={() => setPending(null)}>
+                  <Button
+                    size="compact-xs"
+                    variant="light"
+                    color="gray"
+                    onClick={() => {
+                      setPending(null);
+                      change.reset();
+                      remove.reset();
+                    }}
+                  >
                     Cancel
                   </Button>
                 </Group>
@@ -180,25 +308,38 @@ function GrantRow({ accountId, grant }: { accountId: string; grant: Grant }) {
 
 const WHOLE = "account";
 
-function AddMember({ accountId, cards }: { accountId: string; cards: { id: number; name: string }[] }) {
+function AddMember({
+  accountId,
+  cards,
+  onLink,
+}: {
+  accountId: string;
+  cards: { id: number; name: string }[];
+  onLink: (link: ShownLink) => void;
+}) {
   const queryClient = useQueryClient();
   const [username, setUsername] = useState("");
   const [where, setWhere] = useState(WHOLE);
   const [role, setRole] = useState<Role>("member");
   const onCard = where !== WHOLE;
+  const newGrant = { username: username.trim(), logicalCardId: onCard ? Number(where) : null, role };
+  const added = () => {
+    setUsername("");
+    return queryClient.invalidateQueries({ queryKey: ["accounts"] });
+  };
   const add = useMutation({
-    mutationFn: () =>
-      ok(
-        grantsApi.$post({
-          param: { accountId },
-          json: { username: username.trim(), logicalCardId: onCard ? Number(where) : null, role },
-        }),
-      ),
-    onSuccess: () => {
-      setUsername("");
-      return queryClient.invalidateQueries({ queryKey: ["accounts"] });
+    mutationFn: () => ok(grantsApi.$post({ param: { accountId }, json: newGrant })),
+    onSuccess: added,
+  });
+  const invite = useMutation({
+    mutationFn: () => ok(invitesApi.$post({ param: { accountId }, json: newGrant })),
+    onSuccess: ({ grant, token, expiresAt }) => {
+      add.reset();
+      if (grant) onLink({ grantId: grant.id, token, expiresAt });
+      return added();
     },
   });
+  const unknownUser = add.error instanceof ApiError && add.error.code === "unknown_user";
   return (
     <Paper withBorder p="sm" radius="md">
       <form
@@ -210,28 +351,51 @@ function AddMember({ accountId, cards }: { accountId: string; cards: { id: numbe
         <Stack gap="xs">
           <Title order={5}>Add someone</Title>
           {add.error && (
+            <Alert color={unknownUser ? "blue" : "red"} variant="light">
+              <Stack gap="xs" align="flex-start">
+                <Text size="sm">
+                  {unknownUser
+                    ? `Nobody here is called ${newGrant.username}. Invite them? They'll get this role, and you'll get a link to send them.`
+                    : add.error.message}
+                </Text>
+                {unknownUser && (
+                  <Button size="compact-xs" loading={invite.isPending} onClick={() => invite.mutate()}>
+                    Invite them
+                  </Button>
+                )}
+              </Stack>
+            </Alert>
+          )}
+          {invite.error && (
             <Alert color="red" variant="light">
-              {add.error.message}
+              {invite.error.message}
             </Alert>
           )}
           <Group align="flex-start" gap="xs">
             <TextInput
               label="Username"
-              description="Someone with a login here"
+              description="Existing, or new to invite"
               required
               autoComplete="off"
               w={200}
               value={username}
-              onChange={(e) => setUsername(e.currentTarget.value)}
+              onChange={(e) => {
+                setUsername(e.currentTarget.value);
+                // What's shown is about the name that was tried.
+                add.reset();
+                invite.reset();
+              }}
             />
             <Select
               label="On"
-              description="The whole account, or one card"
+              description="The account, or one card"
               w={200}
               allowDeselect={false}
               data={[
-                { value: WHOLE, label: "Whole account" },
-                ...cards.map((c) => ({ value: String(c.id), label: c.name })),
+                { value: WHOLE, label: "Account" },
+                ...(cards.length > 0
+                  ? [{ group: "Cards", items: cards.map((c) => ({ value: String(c.id), label: c.name })) }]
+                  : []),
               ]}
               value={where}
               onChange={(value) => {
@@ -252,7 +416,7 @@ function AddMember({ accountId, cards }: { accountId: string; cards: { id: numbe
             />
           </Group>
           <Group>
-            <Button type="submit" size="xs" loading={add.isPending} disabled={!username.trim()}>
+            <Button type="submit" size="xs" loading={add.isPending} disabled={!newGrant.username}>
               Add
             </Button>
           </Group>

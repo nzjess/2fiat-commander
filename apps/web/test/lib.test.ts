@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { ApiError, apiError, isUnauthenticated } from "../src/api.ts";
 import { cardNetwork, expiryLabel } from "../src/components/CardFace.tsx";
-import { accessLabel, accessOf, linkGains, roleLabel, roleOptions } from "../src/lib/access.ts";
+import { accessLabel, accessOf, inviteLink, linkGains, roleLabel, roleOptions } from "../src/lib/access.ts";
 import {
   cardLabel,
   cardStatusLabel,
@@ -10,6 +10,7 @@ import {
   isoToLocalDate,
   localDateToIso,
   localDayStart,
+  logicalCardLabel,
   timeAgo,
   toBps,
   toCents,
@@ -330,9 +331,9 @@ describe("access", () => {
   });
 
   test("names roles as the UI does: a manager of a card is its card owner", () => {
-    expect(roleLabel("owner", false)).toBe("Owner");
-    expect(roleLabel("manager", false)).toBe("Manager");
-    expect(roleLabel("member", false)).toBe("Member");
+    expect(roleLabel("owner", false)).toBe("Account owner");
+    expect(roleLabel("manager", false)).toBe("Account manager");
+    expect(roleLabel("member", false)).toBe("Account member");
     expect(roleLabel("manager", true)).toBe("Card owner");
     expect(roleLabel("member", true)).toBe("Card member");
   });
@@ -346,7 +347,7 @@ describe("access", () => {
   });
 
   test("describes a user's own access", () => {
-    expect(accessLabel({ ...none, accountRole: "owner" })).toBe("Owner");
+    expect(accessLabel({ ...none, accountRole: "owner" })).toBe("Account owner");
     const card = (logicalCardId: number, role: "manager" | "member") => ({
       logicalCardId,
       role,
@@ -356,7 +357,9 @@ describe("access", () => {
     expect(accessLabel({ ...none, cards: [card(1, "manager"), card(2, "member")] })).toBe(
       "Card owner, Card member",
     );
-    expect(accessLabel({ ...none, accountRole: "member", cards: [card(1, "manager")] })).toBe("Member");
+    expect(accessLabel({ ...none, accountRole: "member", cards: [card(1, "manager")] })).toBe(
+      "Account member",
+    );
   });
 
   test("a link shows more to those with a grant on just one of the two cards", () => {
@@ -371,5 +374,31 @@ describe("access", () => {
     ];
     expect(linkGains(grants, 1, 2)).toEqual(["amy", "zoe"]);
     expect(linkGains([], 1, 2)).toEqual([]);
+  });
+});
+
+describe("logicalCardLabel", () => {
+  const cards = [
+    { id: 1, maskedNumber: "5257 **** **** 1111" },
+    { id: 2, maskedNumber: "5257 **** **** 2222" },
+  ];
+
+  test("names the current card's last four digits", () => {
+    expect(logicalCardLabel({ name: "Everyday", cardIds: [1, 2], currentCardId: 2 }, cards)).toBe(
+      "Everyday ·· 2222",
+    );
+  });
+
+  test("falls back to its first card, or just the name", () => {
+    expect(logicalCardLabel({ name: "Everyday", cardIds: [1, 2], currentCardId: null }, cards)).toBe(
+      "Everyday ·· 1111",
+    );
+    expect(logicalCardLabel({ name: "New", cardIds: [], currentCardId: null }, cards)).toBe("New");
+  });
+});
+
+describe("inviteLink", () => {
+  test("puts the token in the fragment, on this page's origin", () => {
+    expect(inviteLink("http://127.0.0.1:3000", "abc")).toBe("http://127.0.0.1:3000/invite#abc");
   });
 });

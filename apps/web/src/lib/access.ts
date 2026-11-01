@@ -20,7 +20,7 @@ export function accessOf(access: AccountAccess) {
 /** A role as the UI names it. On a card, a stored `manager` reads "Card owner". */
 export function roleLabel(role: Role, onCard: boolean): string {
   if (onCard) return role === "member" ? "Card member" : "Card owner";
-  return { owner: "Owner", manager: "Manager", member: "Member" }[role];
+  return { owner: "Account owner", manager: "Account manager", member: "Account member" }[role];
 }
 
 /** The roles that can be given on the whole account or on a card, with what they're called. */
@@ -52,5 +52,8 @@ export function linkGains(
   const onB = on(b);
   return [...new Set([...onA, ...onB])]
     .filter((username) => !whole.has(username) && onA.has(username) !== onB.has(username))
-    .sort();
+    .sort((x, y) => x.localeCompare(y));
 }
+
+/** The link an invited person opens. The token is in the fragment, which browsers don't send to any server. */
+export const inviteLink = (origin: string, token: string) => `${origin}/invite#${token}`;

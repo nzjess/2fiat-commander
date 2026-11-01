@@ -15,8 +15,8 @@ import { grantRoutes } from "./api/grants.ts";
 export type { AppDeps } from "./api/common.ts";
 
 /**
- * The HTTP API, under `/api`. Everything but `/health` and `/auth/login` needs a session, and everything under
- * `/accounts/:accountId` needs a grant on that account or one of its cards.
+ * The HTTP API, under `/api`. Everything but `/health` and the routes for logging in, signing up and accepting an
+ * invite needs a session, and everything under `/accounts/:accountId` needs a grant on that account or one of its cards.
  */
 export function createApp(deps: AppDeps) {
   return (

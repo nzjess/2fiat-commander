@@ -5,15 +5,24 @@ import type { Context, ErrorHandler, MiddlewareHandler } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { z } from "zod";
 import { type Access, loadAccess } from "../access.ts";
 import { AccountArchivedError, DuplicateAccountError } from "../accounts.ts";
 import { AdjustmentNotFoundError } from "../adjustments.ts";
-import { resolveSession, SESSION_COOKIE, type SessionUser } from "../auth.ts";
+import {
+  resolveSession,
+  SESSION_COOKIE,
+  type SessionUser,
+  USERNAME_PATTERN,
+  USERNAME_RULE,
+  UsernameTakenError,
+} from "../auth.ts";
 import { DuplicateCategoryError, DuplicateRuleError } from "../categories.ts";
 import type { Db } from "../db/db.ts";
 import { accounts } from "../db/schema.ts";
 import { LedgerNotReadyError } from "../evaluate.ts";
 import { DuplicateGrantError, LastOwnerError, UnknownUserError } from "../grants.ts";
+import { InvalidInviteError, NotPendingError } from "../invites.ts";
 import type { Secrets } from "../secrets.ts";
 import { SyncAlreadyRunningError, type SyncRunner } from "../sync.ts";
 
@@ -22,6 +31,8 @@ export interface AppDeps {
   secrets: Secrets;
   runner: SyncRunner;
   now?: () => Date;
+  /** Whether anyone can create a user for themselves. On unless turned off. */
+  signupEnabled?: boolean;
   /** Passed through to the 2fiat session that checks a new token (e.g. `fetch` in tests). */
   session?: Pick<SessionOptions, "baseUrl" | "fetch" | "sleep" | "maxRetries" | "userAgent">;
 }
@@ -43,6 +54,9 @@ export class ApiError extends Error {
   }
 }
 
+/** A username being given to someone, or looked for among those that were. */
+export const Username = z.string().trim().min(1).max(200).regex(USERNAME_PATTERN, USERNAME_RULE);
+
 export const notFound = (what: string) => new ApiError(404, "not_found", `${what} not found`);
 
 export const handleError: ErrorHandler = (err, c) => {
@@ -63,6 +77,9 @@ function toApiError(err: Error): ApiError | undefined {
   if (err instanceof UnknownUserError) return new ApiError(400, "unknown_user", err.message);
   if (err instanceof DuplicateGrantError) return new ApiError(409, "duplicate_grant", err.message);
   if (err instanceof LastOwnerError) return new ApiError(409, "last_owner", err.message);
+  if (err instanceof UsernameTakenError) return new ApiError(409, "username_taken", err.message);
+  if (err instanceof NotPendingError) return new ApiError(409, "not_pending", err.message);
+  if (err instanceof InvalidInviteError) return new ApiError(404, "invalid_invite", err.message);
   if (err instanceof SyncAlreadyRunningError) return new ApiError(409, "sync_running", err.message);
   if (err instanceof LedgerNotReadyError) return new ApiError(409, "ledger_not_ready", err.message);
   if (err instanceof TwoFiatAuthError) return new ApiError(422, "token_rejected", "2fiat rejected the token");

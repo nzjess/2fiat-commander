@@ -15,6 +15,8 @@ const Env = z.object({
   SYNC_OVERLAP_DAYS: z.coerce.number().int().nonnegative().default(LOOKBACK_DAYS),
   /** How often each account syncs on its own, in minutes. 0 (the default) leaves syncing to the user. */
   SYNC_INTERVAL_MINUTES: z.coerce.number().int().nonnegative().default(0),
+  /** Whether anyone can create a user from the login page. On by default. */
+  SIGNUP_ENABLED: z.enum(["true", "false"]).default("true"),
   /** The built web app (`apps/web/dist`) to serve beside the API. Unset in dev, where Vite serves it. */
   WEB_DIST: z.string().optional(),
   /** Where the daily backups go. Unset (the default) takes none. */
@@ -30,6 +32,7 @@ export interface Config {
   port: number;
   syncOverlapDays: number;
   syncIntervalMinutes: number;
+  signupEnabled: boolean;
   webDist: string | undefined;
   backupDir: string | undefined;
   backupKeep: number;
@@ -57,6 +60,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     port: e.PORT,
     syncOverlapDays: e.SYNC_OVERLAP_DAYS,
     syncIntervalMinutes: e.SYNC_INTERVAL_MINUTES,
+    signupEnabled: e.SIGNUP_ENABLED === "true",
     webDist: e.WEB_DIST ? fromRepoRoot(e.WEB_DIST) : undefined,
     backupDir: e.BACKUP_DIR ? fromRepoRoot(e.BACKUP_DIR) : undefined,
     backupKeep: e.BACKUP_KEEP,

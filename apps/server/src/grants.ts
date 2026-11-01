@@ -1,5 +1,6 @@
-import { and, asc, count, eq, isNull } from "drizzle-orm";
-import { ROLES, type Role } from "./access.ts";
+import { and, asc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { loadAccess, ROLES, type Role } from "./access.ts";
+import { usernameIs } from "./auth.ts";
 import type { Db, Executor } from "./db/db.ts";
 import { grants, users } from "./db/schema.ts";
 
@@ -24,7 +25,7 @@ export class DuplicateGrantError extends Error {
 
 export class LastOwnerError extends Error {
   constructor() {
-    super("an account must keep at least one owner");
+    super("an account must keep at least one owner who has set a password");
     this.name = "LastOwnerError";
   }
 }
@@ -36,6 +37,8 @@ export function listGrants(db: Executor, accountId: number) {
       id: grants.id,
       userId: grants.userId,
       username: users.username,
+      /** Invited, and hasn't set a password yet. */
+      pending: sql<boolean>`${users.passwordHash} IS NULL`.mapWith(Boolean),
       logicalCardId: grants.logicalCardId,
       role: grants.role,
       createdAt: grants.createdAt,
@@ -43,18 +46,38 @@ export function listGrants(db: Executor, accountId: number) {
     .from(grants)
     .innerJoin(users, eq(users.id, grants.userId))
     .where(eq(grants.accountId, accountId))
-    .orderBy(asc(grants.logicalCardId), asc(users.username))
+    .orderBy(asc(grants.logicalCardId), sql`${users.username} COLLATE NOCASE`)
     .all();
+}
+
+/**
+ * Whether `actorId` owns every account the user holds a grant on. Whoever makes a pending user's link can become them,
+ * so someone who doesn't must keep away from a pending user, or they could take what other accounts' owners granted.
+ */
+export function ownsAllGrantsOf(q: Executor, actorId: number, userId: number): boolean {
+  return q
+    .selectDistinct({ accountId: grants.accountId })
+    .from(grants)
+    .where(eq(grants.userId, userId))
+    .all()
+    .every(({ accountId }) => loadAccess(q, accountId, actorId)?.can("grants.manage"));
 }
 
 export function createGrant(
   db: Db,
   accountId: number,
+  actorId: number,
   input: { username: string; logicalCardId: number | null; role: Role },
 ): GrantRow {
   return db.transaction((q) => {
-    const user = q.select({ id: users.id }).from(users).where(eq(users.username, input.username)).get();
-    if (!user) throw new UnknownUserError(input.username);
+    const user = q
+      .select({ id: users.id, passwordHash: users.passwordHash })
+      .from(users)
+      .where(usernameIs(input.username))
+      .get();
+    if (!user || (user.passwordHash === null && !ownsAllGrantsOf(q, actorId, user.id))) {
+      throw new UnknownUserError(input.username);
+    }
     const scope =
       input.logicalCardId === null
         ? isNull(grants.logicalCardId)
@@ -73,15 +96,27 @@ export function createGrant(
   });
 }
 
-/** Whether this grant is what's keeping the account owned. Only grants on the whole account can own it. */
+/**
+ * Whether this grant is what's keeping the account owned. Only grants on the whole account can own it, and only
+ * someone who can log in counts: a pending owner may never turn up.
+ */
 function isLastOwner(q: Executor, grant: GrantRow): boolean {
   if (grant.role !== "owner" || grant.logicalCardId !== null) return false;
-  const owners = q
-    .select({ owners: count() })
+  const another = q
+    .select({ id: grants.id })
     .from(grants)
-    .where(and(eq(grants.accountId, grant.accountId), eq(grants.role, "owner"), isNull(grants.logicalCardId)))
+    .innerJoin(users, eq(users.id, grants.userId))
+    .where(
+      and(
+        eq(grants.accountId, grant.accountId),
+        eq(grants.role, "owner"),
+        isNull(grants.logicalCardId),
+        ne(grants.id, grant.id),
+        isNotNull(users.passwordHash),
+      ),
+    )
     .get();
-  return owners?.owners === 1;
+  return another === undefined;
 }
 
 const findGrant = (q: Executor, accountId: number, id: number) =>
@@ -101,13 +136,21 @@ export function updateGrantRole(db: Db, accountId: number, id: number, role: Rol
   });
 }
 
-/** Removes one grant, leaving the user's others as they are. False if the account has no such grant. */
+/**
+ * Removes one grant, leaving the user's others as they are. False if the account has no such grant. A pending user left
+ * with no grants is deleted, as nothing is waiting for them any more.
+ */
 export function deleteGrant(db: Db, accountId: number, id: number): boolean {
   return db.transaction((q) => {
     const grant = findGrant(q, accountId, id);
     if (!grant) return false;
     if (isLastOwner(q, grant)) throw new LastOwnerError();
     q.delete(grants).where(eq(grants.id, id)).run();
+    const hasGrants = q.select({ id: grants.id }).from(grants).where(eq(grants.userId, grant.userId)).get();
+    if (!hasGrants)
+      q.delete(users)
+        .where(and(eq(users.id, grant.userId), isNull(users.passwordHash)))
+        .run();
     return true;
   });
 }

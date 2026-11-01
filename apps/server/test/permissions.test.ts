@@ -18,6 +18,7 @@ import {
   grants,
   logicalCards,
 } from "../src/db/schema.ts";
+import { createInvite } from "../src/invites.ts";
 import { reevaluate } from "../src/reevaluate.ts";
 import { Secrets } from "../src/secrets.ts";
 import { SyncRunner } from "../src/sync.ts";
@@ -438,6 +439,25 @@ const CASES: RouteCase[] = [
     route: "DELETE /grants/:grantId",
     allowed: OWNER,
     on: (w) => ({ path: `/grants/${w.grantOf("member")}` }),
+  },
+  {
+    route: "POST /invites",
+    allowed: OWNER,
+    on: () => ({ path: "/invites", body: { username: "invited", logicalCardId: null, role: "member" } }),
+  },
+  {
+    route: "POST /invites/:userId",
+    allowed: OWNER,
+    on: (w) => {
+      const { grantId } = createInvite(
+        w.db,
+        w.accountId,
+        { username: "pending", logicalCardId: null, role: "member" },
+        new Date("2026-10-20T12:00:00.000Z"),
+      );
+      const grant = w.db.select().from(grants).where(eq(grants.id, grantId)).get();
+      return { path: `/invites/${grant?.userId}` };
+    },
   },
 
   // Fee schedules
