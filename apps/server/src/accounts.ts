@@ -1,5 +1,6 @@
 import { type SessionOptions, TwoFiatSession } from "@twofiat/client";
 import { and, eq } from "drizzle-orm";
+import { copyCategoriesIn } from "./categories.ts";
 import type { Db, Executor } from "./db/db.ts";
 import { accounts } from "./db/schema.ts";
 import type { Secrets } from "./secrets.ts";
@@ -77,7 +78,8 @@ export function createAccount(
 
 /**
  * Replaces an account whose token 2fiat replaced: adds the new token as a new account and archives the old one,
- * dropping its token and sid. Accounts are hard boundaries, so nothing moves across. Returns the new account's id.
+ * dropping its token and sid. Accounts are hard boundaries, so nothing moves across, but the new account starts
+ * with a copy of the old one's categories and rules. Returns the new account's id.
  */
 export function replaceAccount(
   db: Db,
@@ -95,6 +97,7 @@ export function replaceAccount(
       token: input.token,
       sid: input.sid,
     });
+    copyCategoriesIn(q, accountId, id);
     q.update(accounts)
       .set({
         archivedAt: (input.now ?? new Date()).toISOString(),

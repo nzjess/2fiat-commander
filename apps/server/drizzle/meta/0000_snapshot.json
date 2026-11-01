@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0060b55c-f61f-4bba-a57a-cd3168051383",
+  "id": "54d0c506-17f2-4760-8203-511c855ca20e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "accounts": {
@@ -957,8 +957,8 @@
           "notNull": true,
           "autoincrement": true
         },
-        "user_id": {
-          "name": "user_id",
+        "account_id": {
+          "name": "account_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
@@ -987,18 +987,23 @@
         }
       },
       "indexes": {
-        "categories_user_name": {
-          "name": "categories_user_name",
-          "columns": ["user_id", "name"],
+        "categories_account_name": {
+          "name": "categories_account_name",
+          "columns": ["account_id", "name"],
+          "isUnique": true
+        },
+        "categories_id_account": {
+          "name": "categories_id_account",
+          "columns": ["id", "account_id"],
           "isUnique": true
         }
       },
       "foreignKeys": {
-        "categories_user_id_users_id_fk": {
-          "name": "categories_user_id_users_id_fk",
+        "categories_account_id_accounts_id_fk": {
+          "name": "categories_account_id_accounts_id_fk",
           "tableFrom": "categories",
-          "tableTo": "users",
-          "columnsFrom": ["user_id"],
+          "tableTo": "accounts",
+          "columnsFrom": ["account_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -1018,8 +1023,8 @@
           "notNull": true,
           "autoincrement": true
         },
-        "user_id": {
-          "name": "user_id",
+        "account_id": {
+          "name": "account_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
@@ -1062,28 +1067,28 @@
         }
       },
       "indexes": {
-        "category_rules_user_match_pattern": {
-          "name": "category_rules_user_match_pattern",
-          "columns": ["user_id", "match", "pattern"],
+        "category_rules_account_match_pattern": {
+          "name": "category_rules_account_match_pattern",
+          "columns": ["account_id", "match", "pattern"],
           "isUnique": true
         }
       },
       "foreignKeys": {
-        "category_rules_user_id_users_id_fk": {
-          "name": "category_rules_user_id_users_id_fk",
+        "category_rules_account_id_accounts_id_fk": {
+          "name": "category_rules_account_id_accounts_id_fk",
           "tableFrom": "category_rules",
-          "tableTo": "users",
-          "columnsFrom": ["user_id"],
+          "tableTo": "accounts",
+          "columnsFrom": ["account_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "category_rules_category_id_categories_id_fk": {
-          "name": "category_rules_category_id_categories_id_fk",
+        "category_rules_category_id_account_id_categories_id_account_id_fk": {
+          "name": "category_rules_category_id_account_id_categories_id_account_id_fk",
           "tableFrom": "category_rules",
           "tableTo": "categories",
-          "columnsFrom": ["category_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": ["category_id", "account_id"],
+          "columnsTo": ["id", "account_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }

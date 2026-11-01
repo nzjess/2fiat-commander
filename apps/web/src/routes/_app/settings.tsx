@@ -1,26 +1,19 @@
-import { Divider, Select, Stack, Text, Title } from "@mantine/core";
+import { Select, Stack, Text, Title } from "@mantine/core";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { api, ok } from "../../api.ts";
-import { CategoryManager } from "../../components/Categories.tsx";
-import { RuleManager } from "../../components/Rules.tsx";
 import { ErrorView } from "../../components/status.tsx";
 import { formatDate } from "../../lib/format.ts";
-import { categoriesQuery, fxQuery, meQuery, rulesQuery } from "../../queries.ts";
+import { fxQuery, meQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/_app/settings")({
-  loader: ({ context }) =>
-    Promise.all([
-      context.queryClient.ensureQueryData(fxQuery),
-      context.queryClient.ensureQueryData(categoriesQuery),
-      context.queryClient.ensureQueryData(rulesQuery),
-    ]),
+  loader: ({ context }) => context.queryClient.ensureQueryData(fxQuery),
   component: Settings,
 });
 
 const currencyNames = new Intl.DisplayNames("en", { type: "currency" });
 
-/** The user's own settings: the currency amounts are shown in, and their categories. */
+/** The user's own settings: the currency amounts are shown in. */
 function Settings() {
   const { data: fx } = useSuspenseQuery(fxQuery);
   const queryClient = useQueryClient();
@@ -61,20 +54,6 @@ function Settings() {
           ? `Latest rates: ${formatDate(`${fx.latestDay}T12:00:00Z`)}.`
           : "No exchange rates have been fetched yet, so amounts show in US dollars."}
       </Text>
-      <Divider my="sm" />
-      <Title order={4}>Categories</Title>
-      <Text size="sm" c="dimmed">
-        What your spending went on: purchases take a category, and refunds count back against theirs. Your
-        categories are shared by all your accounts.
-      </Text>
-      <CategoryManager />
-      <Divider my="sm" />
-      <Title order={4}>Rules</Title>
-      <Text size="sm" c="dimmed">
-        Rules set a category on new purchases and refunds at each sync, the first matching rule winning. They
-        never change a category already set, and apply to existing activities only when you ask.
-      </Text>
-      <RuleManager />
     </Stack>
   );
 }

@@ -18,18 +18,6 @@ export const fxQuery = queryOptions({
   staleTime: 3_600_000,
 });
 
-/** The user's categories, shared by all their accounts. */
-export const categoriesQuery = queryOptions({
-  queryKey: ["categories"],
-  queryFn: () => ok(api.categories.$get()),
-});
-
-/** The user's category rules, in order. Under ["categories"], so a category change refreshes them too. */
-export const rulesQuery = queryOptions({
-  queryKey: ["categories", "rules"],
-  queryFn: () => ok(api.categories.rules.$get()),
-});
-
 export const accountsQuery = queryOptions({
   queryKey: ["accounts", "list"],
   queryFn: () => ok(api.accounts.$get()),
@@ -41,6 +29,20 @@ export const accountQuery = (accountId: string) =>
   queryOptions({
     queryKey: ["accounts", accountId],
     queryFn: () => ok(account.$get({ param: { accountId } })),
+  });
+
+/** The account's categories. */
+export const categoriesQuery = (accountId: string) =>
+  queryOptions({
+    queryKey: ["accounts", accountId, "categories"],
+    queryFn: () => ok(account.categories.$get({ param: { accountId } })),
+  });
+
+/** The account's category rules, in order. Under its categories, so a category change refreshes them too. */
+export const rulesQuery = (accountId: string) =>
+  queryOptions({
+    queryKey: ["accounts", accountId, "categories", "rules"],
+    queryFn: () => ok(account.categories.rules.$get({ param: { accountId } })),
   });
 
 export const cardsQuery = (accountId: string) =>

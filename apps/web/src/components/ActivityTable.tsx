@@ -92,12 +92,14 @@ export function ActivityAmount({
  * posting). Names the physical card when the logical card has several.
  */
 export function ActivityTable({
+  accountId,
   activities,
   cards,
   logical,
   selectedId,
   onOpen,
 }: {
+  accountId: string;
   activities: Activity[];
   cards: Card[];
   logical: LogicalCard;
@@ -105,7 +107,7 @@ export function ActivityTable({
   onOpen: (activityId: number) => void;
 }) {
   const byId = new Map(cards.map((c) => [c.id, c]));
-  const { data: categories = [] } = useQuery(categoriesQuery);
+  const { data: categories = [] } = useQuery(categoriesQuery(accountId));
   const categoryById = new Map(categories.map((c) => [c.id, c]));
   const several = logical.cardIds.length > 1;
   return (

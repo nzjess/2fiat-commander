@@ -340,42 +340,51 @@ export const activitySources = sqliteTable(
   ],
 );
 
+/** An account's own categories: two accounts never share one, even with the same owner. */
 export const categories = sqliteTable(
   "categories",
   {
     id: integer().primaryKey({ autoIncrement: true }),
-    userId: integer("user_id")
+    accountId: integer("account_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => accounts.id, { onDelete: "cascade" }),
     name: text().notNull(),
     /** A key into the web app's category palette (`CATEGORY_COLORS`), not a colour value. */
     color: text().$type<CategoryColor>().notNull(),
     createdAt: createdAt(),
   },
-  (t) => [unique("categories_user_name").on(t.userId, t.name)],
+  (t) => [
+    unique("categories_account_name").on(t.accountId, t.name),
+    // The target of rules' composite foreign key, which keeps a rule and its category in the same account.
+    unique("categories_id_account").on(t.id, t.accountId),
+  ],
 );
 
 /**
- * The user's rules for categorising new spending, in their order (the first match wins). A rule only ever fills an
- * uncategorised activity; see `categories.ts`.
+ * An account's rules for categorising new spending, in their order (the first match wins). A rule only ever fills
+ * an uncategorised activity; see `categories.ts`.
  */
 export const categoryRules = sqliteTable(
   "category_rules",
   {
     id: integer().primaryKey({ autoIncrement: true }),
-    userId: integer("user_id")
+    accountId: integer("account_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    categoryId: integer("category_id")
-      .notNull()
-      .references(() => categories.id, { onDelete: "cascade" }),
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    categoryId: integer("category_id").notNull(),
     /** `merchant`: the pattern is a `merchantKey`. `contains`: text in the description or the posted one. */
     match: text().$type<RuleMatch>().notNull(),
     pattern: text().notNull(),
     position: integer().notNull(),
     createdAt: createdAt(),
   },
-  (t) => [unique("category_rules_user_match_pattern").on(t.userId, t.match, t.pattern)],
+  (t) => [
+    unique("category_rules_account_match_pattern").on(t.accountId, t.match, t.pattern),
+    foreignKey({
+      columns: [t.categoryId, t.accountId],
+      foreignColumns: [categories.id, categories.accountId],
+    }).onDelete("cascade"),
+  ],
 );
 
 /** The user's own fields on an activity. Kept apart from `activities`, so re-normalisation never touches them. */

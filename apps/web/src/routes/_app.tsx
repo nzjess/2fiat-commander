@@ -119,6 +119,13 @@ function Nav({ accountId, onNavigate }: { accountId: string | undefined; onNavig
                 onClick={onNavigate}
               />
             ))}
+          <NavItem
+            to="/a/$accountId/categories"
+            params={{ accountId }}
+            label="Categories"
+            active={!!matchRoute({ to: "/a/$accountId/categories", params: { accountId } })}
+            onClick={onNavigate}
+          />
         </>
       )}
       <NavItem
@@ -158,6 +165,11 @@ function AccountSwitcher({ accountId }: { accountId: string | undefined }) {
       allowDeselect={false}
       onChange={async (id) => {
         if (!id) return;
+        // Every account has a Categories page, showing its own.
+        if (matchRoute({ to: "/a/$accountId/categories" })) {
+          void navigate({ to: "/a/$accountId/categories", params: { accountId: id } });
+          return;
+        }
         // Stay on the findings, insights or activity page when switching, without its filters, on the other
         // account's own card (the last chosen there, else its first): cards belong to one account. A card's own
         // page has no counterpart there, so that goes to the overview, as does an account without cards.

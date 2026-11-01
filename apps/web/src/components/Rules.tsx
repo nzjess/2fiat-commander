@@ -19,7 +19,9 @@ import { CategoryLabel } from "./Categories.tsx";
 import { ErrorView } from "./status.tsx";
 
 // Category rules: each sets a category on new uncategorised spending that matches it (the first match wins), and
-// on existing spending only when asked. Shared by all the user's accounts.
+// on existing spending only when asked. Each account has its own.
+
+const rulesApi = api.accounts[":accountId"].categories.rules;
 
 /** A rule's condition in words: `Merchant "GROCER STORES SPRINGFIELD"`, `Description contains "bigstore"`. */
 export function ruleCondition(rule: Pick<Rule, "match" | "pattern">): string {
@@ -28,19 +30,15 @@ export function ruleCondition(rule: Pick<Rule, "match" | "pattern">): string {
     : `Description contains "${rule.pattern}"`;
 }
 
-/** Rules and categories changed: refresh both, and every account's activities and spending. */
-function useRulesChanged() {
+/** Rules and categories changed: refresh both, and the account's activities and spending. */
+function useRulesChanged(accountId: string) {
   const queryClient = useQueryClient();
-  return () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: categoriesQuery.queryKey }),
-      queryClient.invalidateQueries({ queryKey: ["accounts"] }),
-    ]);
+  return () => queryClient.invalidateQueries({ queryKey: ["accounts", accountId] });
 }
 
 /** Says which rule set an activity's category, in the drawer. */
-export function RuleTag({ ruleId }: { ruleId: number }) {
-  const { data: rules } = useQuery(rulesQuery);
+export function RuleTag({ accountId, ruleId }: { accountId: string; ruleId: number }) {
+  const { data: rules } = useQuery(rulesQuery(accountId));
   const rule = rules?.find((r) => r.id === ruleId);
   return (
     <Text size="xs" c="dimmed">
@@ -50,32 +48,33 @@ export function RuleTag({ ruleId }: { ruleId: number }) {
 }
 
 /** Makes a merchant rule from an activity's description, and applies it to the existing uncategorised spending. */
-export function useAlwaysForMerchant(category: Category) {
-  const changed = useRulesChanged();
+export function useAlwaysForMerchant(accountId: string, category: Category) {
+  const changed = useRulesChanged(accountId);
   return useMutation({
     mutationFn: async (description: string) => {
       const rule = await ok(
-        api.categories.rules.$post({
+        rulesApi.$post({
+          param: { accountId },
           json: { categoryId: category.id, match: "merchant", pattern: description },
         }),
       );
-      return ok(api.categories.rules[":ruleId"].apply.$post({ param: { ruleId: String(rule.id) } }));
+      return ok(rulesApi[":ruleId"].apply.$post({ param: { accountId, ruleId: String(rule.id) } }));
     },
     onSuccess: changed,
   });
 }
 
 /** Offers a rule's category for the existing uncategorised spending it matches, when there is any. */
-function ApplyOffer({ rule, onDone }: { rule: Rule; onDone: () => void }) {
-  const changed = useRulesChanged();
-  const param = { param: { ruleId: String(rule.id) } };
+function ApplyOffer({ accountId, rule, onDone }: { accountId: string; rule: Rule; onDone: () => void }) {
+  const changed = useRulesChanged(accountId);
+  const param = { param: { accountId, ruleId: String(rule.id) } };
   const { data } = useQuery({
-    queryKey: ["categories", "rules", rule.id, "matches"],
-    queryFn: () => ok(api.categories.rules[":ruleId"].matches.$get(param)),
+    queryKey: [...rulesQuery(accountId).queryKey, rule.id, "matches"],
+    queryFn: () => ok(rulesApi[":ruleId"].matches.$get(param)),
     staleTime: 0,
   });
   const apply = useMutation({
-    mutationFn: () => ok(api.categories.rules[":ruleId"].apply.$post(param)),
+    mutationFn: () => ok(rulesApi[":ruleId"].apply.$post(param)),
     onSuccess: changed,
   });
   if (apply.isSuccess) {
@@ -110,16 +109,16 @@ const MATCHES: { value: RuleMatch; label: string }[] = [
   { value: "merchant", label: "Merchant is" },
 ];
 
-/** The user's rules in order, to add, edit, reorder and delete. */
-export function RuleManager() {
-  const { data: rules = [] } = useQuery(rulesQuery);
-  const { data: categories = [] } = useQuery(categoriesQuery);
-  const changed = useRulesChanged();
+/** The account's rules in order, to add, edit, reorder and delete. */
+export function RuleManager({ accountId }: { accountId: string }) {
+  const { data: rules = [] } = useQuery(rulesQuery(accountId));
+  const { data: categories = [] } = useQuery(categoriesQuery(accountId));
+  const changed = useRulesChanged(accountId);
   // The rule just added or edited, offered for the existing spending it matches; `at` starts each offer afresh.
   const [offer, setOffer] = useState<{ ruleId: number; at: number } | undefined>();
   const offerFor = (ruleId: number) => setOffer({ ruleId, at: Date.now() });
   const reorder = useMutation({
-    mutationFn: (ids: number[]) => send(api.categories.rules.order.$put({ json: { ids } })),
+    mutationFn: (ids: number[]) => send(rulesApi.order.$put({ param: { accountId }, json: { ids } })),
     onSuccess: changed,
   });
   const move = (index: number, by: -1 | 1) => {
@@ -140,6 +139,7 @@ export function RuleManager() {
       {rules.map((rule, i) => (
         <RuleRow
           key={rule.id}
+          accountId={accountId}
           rule={rule}
           categories={categories}
           first={i === 0}
@@ -150,13 +150,16 @@ export function RuleManager() {
         />
       ))}
       {reorder.error && <ErrorView error={reorder.error} />}
-      {offered && <ApplyOffer key={offer?.at} rule={offered} onDone={() => setOffer(undefined)} />}
-      <NewRule categories={categories} onAdded={offerFor} />
+      {offered && (
+        <ApplyOffer key={offer?.at} accountId={accountId} rule={offered} onDone={() => setOffer(undefined)} />
+      )}
+      <NewRule accountId={accountId} categories={categories} onAdded={offerFor} />
     </Stack>
   );
 }
 
 function RuleRow({
+  accountId,
   rule,
   categories,
   first,
@@ -165,6 +168,7 @@ function RuleRow({
   onMove,
   onSaved,
 }: {
+  accountId: string;
   rule: Rule;
   categories: Category[];
   first: boolean;
@@ -173,14 +177,13 @@ function RuleRow({
   onMove: (by: -1 | 1) => void;
   onSaved: () => void;
 }) {
-  const changed = useRulesChanged();
+  const changed = useRulesChanged(accountId);
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [clear, setClear] = useState(false);
-  const param = { ruleId: String(rule.id) };
+  const param = { accountId, ruleId: String(rule.id) };
   const remove = useMutation({
-    mutationFn: () =>
-      send(api.categories.rules[":ruleId"].$delete({ param, query: clear ? { clear: "true" } : {} })),
+    mutationFn: () => send(rulesApi[":ruleId"].$delete({ param, query: clear ? { clear: "true" } : {} })),
     onSuccess: changed,
   });
   const category = categories.find((c) => c.id === rule.categoryId);
@@ -189,6 +192,7 @@ function RuleRow({
   if (editing) {
     return (
       <RuleForm
+        accountId={accountId}
         rule={rule}
         categories={categories}
         onCancel={() => setEditing(false)}
@@ -277,7 +281,15 @@ function RuleRow({
 }
 
 /** Adds a rule, with a live count of the existing uncategorised spending it would match. */
-function NewRule({ categories, onAdded }: { categories: Category[]; onAdded: (ruleId: number) => void }) {
+function NewRule({
+  accountId,
+  categories,
+  onAdded,
+}: {
+  accountId: string;
+  categories: Category[];
+  onAdded: (ruleId: number) => void;
+}) {
   const [open, setOpen] = useState(false);
   if (!open) {
     return (
@@ -300,6 +312,7 @@ function NewRule({ categories, onAdded }: { categories: Category[]; onAdded: (ru
   }
   return (
     <RuleForm
+      accountId={accountId}
       categories={categories}
       onCancel={() => setOpen(false)}
       onSaved={(id) => {
@@ -312,17 +325,19 @@ function NewRule({ categories, onAdded }: { categories: Category[]; onAdded: (ru
 
 /** Edits a rule, or makes a new one when there's none. */
 function RuleForm({
+  accountId,
   rule,
   categories,
   onCancel,
   onSaved,
 }: {
+  accountId: string;
   rule?: Rule;
   categories: Category[];
   onCancel: () => void;
   onSaved: (ruleId: number) => void;
 }) {
-  const changed = useRulesChanged();
+  const changed = useRulesChanged(accountId);
   const [match, setMatch] = useState<RuleMatch>(rule?.match ?? "contains");
   // A merchant shows as 2fiat writes it, in capitals; it's stored as matched, in lower case.
   const [pattern, setPattern] = useState(
@@ -332,19 +347,19 @@ function RuleForm({
   const [moveSet, setMoveSet] = useState(true);
   const [typed] = useDebouncedValue(pattern.trim(), 300);
   const { data: preview } = useQuery({
-    queryKey: ["categories", "rules", "preview", match, typed],
-    queryFn: () => ok(api.categories.rules.preview.$get({ query: { match, pattern: typed } })),
+    queryKey: [...rulesQuery(accountId).queryKey, "preview", match, typed],
+    queryFn: () => ok(rulesApi.preview.$get({ param: { accountId }, query: { match, pattern: typed } })),
     enabled: typed.length > 0,
   });
   const save = useMutation({
     mutationFn: async () => {
       if (categoryId === undefined) throw new Error("Choose a category");
       const json = { categoryId, match, pattern: pattern.trim() };
-      if (!rule) return ok(api.categories.rules.$post({ json }));
+      if (!rule) return ok(rulesApi.$post({ param: { accountId }, json }));
       const moving = categoryId !== rule.categoryId && rule.activityCount > 0 && moveSet;
       return ok(
-        api.categories.rules[":ruleId"].$patch({
-          param: { ruleId: String(rule.id) },
+        rulesApi[":ruleId"].$patch({
+          param: { accountId, ruleId: String(rule.id) },
           json: { ...json, ...(moving && { move: true }) },
         }),
       );

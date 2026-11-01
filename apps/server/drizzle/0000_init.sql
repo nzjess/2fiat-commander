@@ -144,27 +144,28 @@ CREATE UNIQUE INDEX `cards_one_current` ON `cards` (`logical_card_id`) WHERE is_
 CREATE UNIQUE INDEX `cards_account_twofiat` ON `cards` (`account_id`,`twofiat_id`);--> statement-breakpoint
 CREATE TABLE `categories` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`user_id` integer NOT NULL,
+	`account_id` integer NOT NULL,
 	`name` text NOT NULL,
 	`color` text NOT NULL,
 	`created_at` text NOT NULL,
-	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `categories_user_name` ON `categories` (`user_id`,`name`);--> statement-breakpoint
+CREATE UNIQUE INDEX `categories_account_name` ON `categories` (`account_id`,`name`);--> statement-breakpoint
+CREATE UNIQUE INDEX `categories_id_account` ON `categories` (`id`,`account_id`);--> statement-breakpoint
 CREATE TABLE `category_rules` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`user_id` integer NOT NULL,
+	`account_id` integer NOT NULL,
 	`category_id` integer NOT NULL,
 	`match` text NOT NULL,
 	`pattern` text NOT NULL,
 	`position` integer NOT NULL,
 	`created_at` text NOT NULL,
-	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`category_id`) REFERENCES `categories`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`category_id`,`account_id`) REFERENCES `categories`(`id`,`account_id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `category_rules_user_match_pattern` ON `category_rules` (`user_id`,`match`,`pattern`);--> statement-breakpoint
+CREATE UNIQUE INDEX `category_rules_account_match_pattern` ON `category_rules` (`account_id`,`match`,`pattern`);--> statement-breakpoint
 CREATE TABLE `evaluations` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`account_id` integer NOT NULL,

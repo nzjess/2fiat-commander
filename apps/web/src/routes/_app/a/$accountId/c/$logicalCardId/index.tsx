@@ -65,7 +65,7 @@ export const Route = createFileRoute("/_app/a/$accountId/c/$logicalCardId/")({
       queryClient.ensureQueryData(findingsQuery(accountId, { card: id })),
       queryClient.ensureQueryData(adjustmentsQuery(accountId, id)),
       queryClient.ensureQueryData(cashFlowQuery(accountId, id)),
-      queryClient.ensureQueryData(categoriesQuery),
+      queryClient.ensureQueryData(categoriesQuery(accountId)),
       queryClient.ensureQueryData(recentQuery(accountId, id)),
     ]);
   },
@@ -166,6 +166,7 @@ function LogicalCardPage() {
           </Text>
         ) : (
           <ActivityTable
+            accountId={accountId}
             activities={recent.items}
             cards={cards}
             logical={logical}

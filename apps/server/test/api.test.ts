@@ -12,6 +12,7 @@ import { eq } from "drizzle-orm";
 import { type ClientResponse, hc } from "hono/client";
 import type { SuccessStatusCode } from "hono/utils/http-status";
 import { describe, expect, test } from "vitest";
+import type { categoryRoutes } from "../src/api/categories.ts";
 import { type App, createApp } from "../src/app.ts";
 import { createUser, hashPassword } from "../src/auth.ts";
 import { openDb } from "../src/db/db.ts";
@@ -19,6 +20,7 @@ import {
   accounts,
   activityAnnotations,
   cards as cardsTable,
+  categoryRules,
   fxRates,
   sessions,
   syncs,
@@ -86,7 +88,13 @@ function client(app: App) {
     }
     return res;
   }) as typeof globalThis.fetch;
-  return { api: hc<App>("http://localhost", { fetch }).api, jar };
+  return {
+    api: hc<App>("http://localhost", { fetch }).api,
+    jar,
+    /** The category routes of one account, without repeating its id on every call. */
+    inAccount: (accountId: number) =>
+      hc<ReturnType<typeof categoryRoutes>>(`http://localhost/api/accounts/${accountId}`, { fetch }),
+  };
 }
 
 async function loggedIn(s: Awaited<ReturnType<typeof setup>>) {
@@ -109,7 +117,7 @@ async function synced() {
   const account = c.api.accounts[":accountId"];
   const cardsByTwofiatId = async () =>
     new Map((await ok(account.cards.$get({ param }))).map((card) => [card.twofiatId, card]));
-  return { ...s, ...c, accountId, param, account, cardsByTwofiatId };
+  return { ...s, ...c, accountId, param, account, cats: c.inAccount(accountId), cardsByTwofiatId };
 }
 
 describe("auth", () => {
@@ -337,6 +345,46 @@ describe("accounts", () => {
     expect(await sync.json()).toMatchObject({ error: "account_archived" });
     const again = await s.account.replacement.$post({ param: s.param, json: { token: "token1zzz" } });
     expect(again.status).toBe(409);
+  });
+
+  test("replacing the token copies the categories and rules across, and nothing else", async () => {
+    const s = await synced();
+    const food = await ok(s.cats.categories.$post({ json: { name: "Food", color: "red" } }));
+    const fun = await ok(s.cats.categories.$post({ json: { name: "Fun" } }));
+    const rules = s.cats.categories.rules;
+    await ok(rules.$post({ json: { categoryId: fun.id, match: "contains", pattern: "kiosk" } }));
+    const shop = await ok(rules.$post({ json: { categoryId: food.id, match: "contains", pattern: "shop" } }));
+    await ok(rules[":ruleId"].apply.$post({ param: { ruleId: String(shop.id) } }));
+
+    const res = await s.account.replacement.$post({ param: s.param, json: { token: NEW_TOKEN } });
+    const { id } = (await res.json()) as { id: number };
+    const copy = s.inAccount(id).categories;
+    const copied = await ok(copy.$get());
+    expect(copied.map((c) => [c.name, c.color, c.activityCount, c.ruleCount])).toEqual([
+      ["Food", "red", 0, 1],
+      ["Fun", "blue", 0, 1],
+    ]);
+    const copiedFood = copied[0] as (typeof copied)[number];
+    expect(copiedFood.id).not.toBe(food.id);
+    const copiedRules = await ok(copy.rules.$get());
+    expect(copiedRules.map((r) => [r.pattern, r.categoryId, r.activityCount])).toEqual([
+      ["kiosk", copied[1]?.id, 0],
+      ["shop", copiedFood.id, 0],
+    ]);
+
+    // The first sync's spending counts as new, so the copied rules categorise it.
+    await s.runner.sync(id, "manual");
+    const { items } = await ok(
+      s.account.activities.$get({ param: { accountId: String(id) }, query: { kind: "purchase" } }),
+    );
+    const shopping = items.find((a) => a.description.includes("SHOP"));
+    expect(shopping).toMatchObject({ categoryId: copiedFood.id, categoryRuleId: copiedRules[1]?.id });
+
+    // No link is left: a change to the copy leaves the original alone.
+    await ok(
+      copy[":categoryId"].$patch({ param: { categoryId: String(copiedFood.id) }, json: { name: "Eats" } }),
+    );
+    expect((await ok(s.cats.categories.$get())).map((c) => c.name)).toEqual(["Food", "Fun"]);
   });
 });
 
@@ -658,9 +706,9 @@ describe("activities", () => {
 });
 
 describe("categories and notes", () => {
-  test("a user's categories are shared by their accounts, with colours, usage counts and unique names", async () => {
+  test("an account has its own categories, with colours, usage counts and unique names", async () => {
     const s = await synced();
-    const cats = s.api.categories;
+    const cats = s.cats.categories;
     const groceries = await ok(cats.$post({ json: { name: "Groceries" } }));
     const travel = await ok(cats.$post({ json: { name: "  Travel " } }));
     const eating = await ok(cats.$post({ json: { name: "eating out", color: "blue" } }));
@@ -685,18 +733,52 @@ describe("categories and notes", () => {
     );
     expect((await ok(cats.$get())).map((c) => c.name)).toEqual(["eating out", "Fun", "groceries", "Trips"]);
 
-    // Another user sees none of them, and can't change them.
+    // Another user can't see or change them.
     await createUser(s.db, "other", await hashPassword(PASSWORD));
     const other = client(s.app);
     await other.api.auth.login.$post({ json: { username: "other", password: PASSWORD } });
-    expect(await ok(other.api.categories.$get())).toEqual([]);
-    expect((await other.api.categories[":categoryId"].$delete(param(travel))).status).toBe(404);
-    expect((await client(s.app).api.categories.$get()).status).toBe(401);
+    const theirs = other.inAccount(s.accountId).categories;
+    expect((await theirs.$get()).status).toBe(404);
+    expect((await theirs[":categoryId"].$delete(param(travel))).status).toBe(404);
+    expect((await client(s.app).inAccount(s.accountId).categories.$get()).status).toBe(401);
+  });
+
+  test("two accounts of one user don't share categories", async () => {
+    const s = await synced();
+    const groceries = await ok(s.cats.categories.$post({ json: { name: "Groceries" } }));
+    const second = await ok(s.api.accounts.$post({ json: { label: "second", token: NEW_TOKEN } }));
+    await s.runner.sync(second.id, "manual");
+    const cats = s.inAccount(second.id).categories;
+    expect(await ok(cats.$get())).toEqual([]);
+
+    // The same name is free there, and takes the palette's first colour afresh.
+    expect(await ok(cats.$post({ json: { name: "Groceries" } }))).toMatchObject({ color: "blue" });
+    // The first account's category can't be reached through the second.
+    const param = { param: { categoryId: String(groceries.id) } };
+    expect((await cats[":categoryId"].$patch({ ...param, json: { name: "X" } })).status).toBe(404);
+    expect((await cats[":categoryId"].$delete(param)).status).toBe(404);
+
+    // Nor set on the second's activities, one at a time or in bulk.
+    const accountParam = { accountId: String(second.id) };
+    const { items } = await ok(
+      s.account.activities.$get({ param: accountParam, query: { kind: "purchase" } }),
+    );
+    const activity = items[0] as (typeof items)[number];
+    const one = s.account.activities[":activityId"].annotation.$patch({
+      param: { ...accountParam, activityId: String(activity.id) },
+      json: { categoryId: groceries.id },
+    });
+    expect((await one).status).toBe(400);
+    const bulk = s.account.activities.categorize.$post({
+      param: accountParam,
+      json: { activityIds: [activity.id], categoryId: groceries.id },
+    });
+    expect((await bulk).status).toBe(400);
   });
 
   test("spending takes a category, anything takes a note, and both filter and search", async () => {
     const s = await synced();
-    const groceries = await ok(s.api.categories.$post({ json: { name: "Groceries" } }));
+    const groceries = await ok(s.cats.categories.$post({ json: { name: "Groceries" } }));
     const activities = s.account.activities;
     const all = (await ok(activities.$get({ param: s.param, query: {} }))).items;
     const byDescription = (d: string) => all.find((a) => a.description === d) as (typeof all)[number];
@@ -740,7 +822,7 @@ describe("categories and notes", () => {
       activities[":activityId"].$get({ param: { ...s.param, activityId: String(shop.id) } }),
     );
     expect(detail).toMatchObject({ categoryId: groceries.id, note: "milk and eggs" });
-    expect((await ok(s.api.categories.$get()))[0]?.activityCount).toBe(1);
+    expect((await ok(s.cats.categories.$get()))[0]?.activityCount).toBe(1);
 
     // Clearing both deletes the annotation; a full rebuild keeps them.
     await ok(annotate(fee, { note: null }));
@@ -751,7 +833,8 @@ describe("categories and notes", () => {
 
     // Deleting the category makes its activities uncategorised, and keeps their notes.
     expect(
-      (await s.api.categories[":categoryId"].$delete({ param: { categoryId: String(groceries.id) } })).status,
+      (await s.cats.categories[":categoryId"].$delete({ param: { categoryId: String(groceries.id) } }))
+        .status,
     ).toBe(204);
     expect(
       await ok(activities[":activityId"].$get({ param: { ...s.param, activityId: String(shop.id) } })),
@@ -784,7 +867,7 @@ describe("categories and notes", () => {
       }),
     );
     await s.runner.sync(s.accountId, "manual");
-    const groceries = await ok(s.api.categories.$post({ json: { name: "Groceries" } }));
+    const groceries = await ok(s.cats.categories.$post({ json: { name: "Groceries" } }));
     const activities = s.account.activities;
     const all = (await ok(activities.$get({ param: s.param, query: {} }))).items;
     const shops = all.filter((a) => a.description.startsWith("SHOP "));
@@ -814,13 +897,13 @@ describe("categories and notes", () => {
 });
 
 describe("category rules", () => {
-  const rulesApi = (s: Awaited<ReturnType<typeof synced>>) => s.api.categories.rules;
+  const rulesApi = (s: Awaited<ReturnType<typeof synced>>) => s.cats.categories.rules;
   const purchases = async (s: Awaited<ReturnType<typeof synced>>) =>
     (await ok(s.account.activities.$get({ param: s.param, query: { kind: "purchase,refund" } }))).items;
 
-  test("are kept per user, in order, with their patterns stored as matched", async () => {
+  test("are kept per account, in order, with their patterns stored as matched", async () => {
     const s = await synced();
-    const groceries = await ok(s.api.categories.$post({ json: { name: "Groceries" } }));
+    const groceries = await ok(s.cats.categories.$post({ json: { name: "Groceries" } }));
     const rules = rulesApi(s);
     const merchant = await ok(
       rules.$post({
@@ -864,21 +947,51 @@ describe("category rules", () => {
     await createUser(s.db, "other", await hashPassword(PASSWORD));
     const other = client(s.app);
     await other.api.auth.login.$post({ json: { username: "other", password: PASSWORD } });
-    expect(await ok(other.api.categories.rules.$get())).toEqual([]);
+    const theirs = other.inAccount(s.accountId).categories.rules;
+    expect((await theirs.$get()).status).toBe(404);
     expect(
-      (
-        await other.api.categories.rules[":ruleId"].$delete({
-          param: { ruleId: String(merchant.id) },
-          query: {},
-        })
-      ).status,
+      (await theirs[":ruleId"].$delete({ param: { ruleId: String(merchant.id) }, query: {} })).status,
     ).toBe(404);
+  });
+
+  test("only touch their own account, even for the same owner and the same spending", async () => {
+    const s = await synced();
+    const second = await ok(s.api.accounts.$post({ json: { label: "second", token: NEW_TOKEN } }));
+    await s.runner.sync(second.id, "manual");
+    const food = await ok(s.cats.categories.$post({ json: { name: "Food" } }));
+    const rule = await ok(
+      s.cats.categories.rules.$post({ json: { categoryId: food.id, match: "contains", pattern: "shop" } }),
+    );
+    const param = { param: { ruleId: String(rule.id) } };
+
+    // The second account's matching spending isn't counted, and stays uncategorised when the rule is applied.
+    expect(await ok(s.cats.categories.rules[":ruleId"].matches.$get(param))).toEqual({ count: 1 });
+    expect(await ok(s.cats.categories.rules[":ruleId"].apply.$post(param))).toEqual({ count: 1 });
+    const { items } = await ok(
+      s.account.activities.$get({ param: { accountId: String(second.id) }, query: { kind: "purchase" } }),
+    );
+    expect(items.filter((a) => a.categoryId !== null)).toEqual([]);
+
+    // The database refuses a rule whose category is another account's, whatever the API does.
+    expect(() =>
+      s.db
+        .insert(categoryRules)
+        .values({ accountId: second.id, categoryId: food.id, match: "contains", pattern: "y", position: 0 })
+        .run(),
+    ).toThrow(/FOREIGN KEY/);
+
+    // A rule can't take another account's category, or be reached through another account.
+    const rules = s.inAccount(second.id).categories.rules;
+    expect(
+      (await rules.$post({ json: { categoryId: food.id, match: "contains", pattern: "x" } })).status,
+    ).toBe(400);
+    expect((await rules[":ruleId"].apply.$post(param)).status).toBe(404);
   });
 
   test("categorise a sync's new spending only, the first match winning, and never what's categorised", async () => {
     const s = await synced();
-    const food = await ok(s.api.categories.$post({ json: { name: "Food" } }));
-    const fun = await ok(s.api.categories.$post({ json: { name: "Fun" } }));
+    const food = await ok(s.cats.categories.$post({ json: { name: "Food" } }));
+    const fun = await ok(s.cats.categories.$post({ json: { name: "Fun" } }));
     const rules = rulesApi(s);
     await ok(
       rules.$post({ json: { categoryId: food.id, match: "merchant", pattern: "SHOP SPRINGFIELD USA" } }),
@@ -928,8 +1041,8 @@ describe("category rules", () => {
 
   test("apply to existing spending on request, and on change or deletion keep, move or clear what they set", async () => {
     const s = await synced();
-    const food = await ok(s.api.categories.$post({ json: { name: "Food" } }));
-    const treats = await ok(s.api.categories.$post({ json: { name: "Treats" } }));
+    const food = await ok(s.cats.categories.$post({ json: { name: "Food" } }));
+    const treats = await ok(s.cats.categories.$post({ json: { name: "Treats" } }));
     const rules = rulesApi(s);
     const rule = await ok(
       rules.$post({ json: { categoryId: food.id, match: "contains", pattern: "springfield" } }),
@@ -990,8 +1103,8 @@ describe("category rules", () => {
   });
   test("go with their category: deleting it deletes them, and what they set becomes uncategorised", async () => {
     const s = await synced();
-    const food = await ok(s.api.categories.$post({ json: { name: "Food" } }));
-    const fun = await ok(s.api.categories.$post({ json: { name: "Fun" } }));
+    const food = await ok(s.cats.categories.$post({ json: { name: "Food" } }));
+    const fun = await ok(s.cats.categories.$post({ json: { name: "Fun" } }));
     const rules = rulesApi(s);
     const shop = await ok(rules.$post({ json: { categoryId: food.id, match: "contains", pattern: "shop" } }));
     await ok(rules.$post({ json: { categoryId: food.id, match: "contains", pattern: "cafe" } }));
@@ -999,13 +1112,13 @@ describe("category rules", () => {
       rules.$post({ json: { categoryId: fun.id, match: "contains", pattern: "kiosk" } }),
     );
     await ok(rules[":ruleId"].apply.$post({ param: { ruleId: String(shop.id) } }));
-    expect((await ok(s.api.categories.$get())).map((c) => [c.name, c.activityCount, c.ruleCount])).toEqual([
+    expect((await ok(s.cats.categories.$get())).map((c) => [c.name, c.activityCount, c.ruleCount])).toEqual([
       ["Food", 1, 2],
       ["Fun", 0, 1],
     ]);
 
     expect(
-      (await s.api.categories[":categoryId"].$delete({ param: { categoryId: String(food.id) } })).status,
+      (await s.cats.categories[":categoryId"].$delete({ param: { categoryId: String(food.id) } })).status,
     ).toBe(204);
     expect((await ok(rules.$get())).map((r) => r.id)).toEqual([kiosk.id]);
     const set = (await purchases(s)).filter((a) => a.categoryId !== null || a.categoryRuleId !== null);

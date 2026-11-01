@@ -27,7 +27,7 @@ export const Route = createFileRoute("/_app/a/$accountId/c/$logicalCardId/insigh
       queryClient.ensureQueryData(balanceHistoryQuery(accountId, id)),
       queryClient.ensureQueryData(feesQuery(accountId, id)),
       queryClient.ensureQueryData(feeSchedulesQuery(accountId)),
-      queryClient.ensureQueryData(categoriesQuery),
+      queryClient.ensureQueryData(categoriesQuery(accountId)),
     ]);
   },
   component: Insights,

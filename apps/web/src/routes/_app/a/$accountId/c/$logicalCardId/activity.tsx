@@ -236,6 +236,7 @@ function Filters({
           clearable
         />
         <CategoryFilter
+          accountId={accountId}
           value={split(search.category)}
           onChange={(values) => update({ category: join(values) })}
         />
@@ -295,8 +296,16 @@ function Filters({
 }
 
 /** Narrows to some categories, or to spending with none yet. */
-function CategoryFilter({ value, onChange }: { value: string[]; onChange: (values: string[]) => void }) {
-  const { data: categories = [] } = useQuery(categoriesQuery);
+function CategoryFilter({
+  accountId,
+  value,
+  onChange,
+}: {
+  accountId: string;
+  value: string[];
+  onChange: (values: string[]) => void;
+}) {
+  const { data: categories = [] } = useQuery(categoriesQuery(accountId));
   const hex = useCategoryColor();
   const colorOf = new Map(categories.map((c) => [String(c.id), hex(c.color)]));
   const swatch = (v: string) =>
@@ -479,6 +488,7 @@ function Pages({
   return (
     <Stack gap="xs" style={{ opacity: isPlaceholderData ? 0.6 : 1 }}>
       <ActivityTable
+        accountId={accountId}
         activities={data.items}
         cards={cards}
         logical={logical}

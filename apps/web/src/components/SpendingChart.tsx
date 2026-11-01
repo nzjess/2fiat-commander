@@ -55,7 +55,7 @@ export function SpendingChart({
   compact?: boolean;
 }) {
   const { data } = useSuspenseQuery(cashFlowQuery(accountId, logicalCardId));
-  const { data: categories } = useSuspenseQuery(categoriesQuery);
+  const { data: categories } = useSuspenseQuery(categoriesQuery(accountId));
   const scheme = useComputedColorScheme("light");
   const [range, setRange] = useState<Range>("90d");
   const [bucket, setBucket] = useState<SpendingBucket>(defaultSpendingBucket(90));

@@ -48,9 +48,11 @@ function useAnnotationChanged(accountId: string) {
     Promise.all([
       queryClient.invalidateQueries({ queryKey: ["accounts", accountId, "activities"] }),
       queryClient.invalidateQueries({ queryKey: ["accounts", accountId, "cash-flow"] }),
-      queryClient.invalidateQueries({ queryKey: categoriesQuery.queryKey }),
+      queryClient.invalidateQueries({ queryKey: categoriesQuery(accountId).queryKey }),
     ]);
 }
+
+const categoriesApi = api.accounts[":accountId"].categories;
 
 type Annotated = Pick<
   Activity,
@@ -80,6 +82,7 @@ export function ActivityAnnotation({ accountId, activity }: { accountId: string;
     <Stack gap="xs">
       {activity.categorizable && (
         <CategoryPicker
+          accountId={accountId}
           value={activity.categoryId}
           disabled={annotate.isPending}
           onChange={(category) =>
@@ -90,7 +93,7 @@ export function ActivityAnnotation({ accountId, activity }: { accountId: string;
           }
         />
       )}
-      {activity.categoryRuleId !== null && <RuleTag ruleId={activity.categoryRuleId} />}
+      {activity.categoryRuleId !== null && <RuleTag accountId={accountId} ruleId={activity.categoryRuleId} />}
       {offer && (
         <SameMerchantOffer
           accountId={accountId}
@@ -113,24 +116,26 @@ export function ActivityAnnotation({ accountId, activity }: { accountId: string;
 
 const NEW = "new:";
 
-/** Picks one of the user's categories, or creates one from what's typed. */
+/** Picks one of the account's categories, or creates one from what's typed. */
 export function CategoryPicker({
+  accountId,
   value,
   disabled,
   onChange,
 }: {
+  accountId: string;
   value: number | null;
   disabled?: boolean;
   onChange: (category: Category | null) => void;
 }) {
   const queryClient = useQueryClient();
-  const { data: categories = [] } = useQuery(categoriesQuery);
+  const { data: categories = [] } = useQuery(categoriesQuery(accountId));
   const hex = useCategoryColor();
   const [search, setSearch] = useState("");
   const create = useMutation({
-    mutationFn: (name: string) => ok(api.categories.$post({ json: { name } })),
+    mutationFn: (name: string) => ok(categoriesApi.$post({ param: { accountId }, json: { name } })),
     onSuccess: async (category) => {
-      await queryClient.invalidateQueries({ queryKey: categoriesQuery.queryKey });
+      await queryClient.invalidateQueries({ queryKey: categoriesQuery(accountId).queryKey });
       onChange(category);
     },
   });
@@ -245,7 +250,7 @@ function SameMerchantOffer({
       ),
     onSuccess: changed,
   });
-  const always = useAlwaysForMerchant(category);
+  const always = useAlwaysForMerchant(accountId, category);
   const ids = data?.activityIds ?? [];
   if (apply.isSuccess) {
     return (
@@ -308,19 +313,15 @@ function SameMerchantOffer({
   );
 }
 
-/** The user's categories, to add, rename, recolour and delete. Shared by all their accounts. */
-export function CategoryManager() {
+/** The account's categories, to add, rename, recolour and delete. */
+export function CategoryManager({ accountId }: { accountId: string }) {
   const queryClient = useQueryClient();
-  const { data: categories = [] } = useQuery(categoriesQuery);
+  const { data: categories = [] } = useQuery(categoriesQuery(accountId));
   const [name, setName] = useState("");
-  // Category changes show on every account's activities and spending.
-  const changed = () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: categoriesQuery.queryKey }),
-      queryClient.invalidateQueries({ queryKey: ["accounts"] }),
-    ]);
+  // Category changes show on the account's activities and spending.
+  const changed = () => queryClient.invalidateQueries({ queryKey: ["accounts", accountId] });
   const create = useMutation({
-    mutationFn: (name: string) => ok(api.categories.$post({ json: { name } })),
+    mutationFn: (name: string) => ok(categoriesApi.$post({ param: { accountId }, json: { name } })),
     onSuccess: async () => {
       setName("");
       await changed();
@@ -335,7 +336,7 @@ export function CategoryManager() {
         </Text>
       )}
       {categories.map((c) => (
-        <CategoryRow key={c.id} category={c} onChanged={changed} />
+        <CategoryRow key={c.id} accountId={accountId} category={c} onChanged={changed} />
       ))}
       <form
         onSubmit={(e) => {
@@ -367,21 +368,29 @@ export function CategoryManager() {
   );
 }
 
-function CategoryRow({ category, onChanged }: { category: Category; onChanged: () => Promise<unknown> }) {
+function CategoryRow({
+  accountId,
+  category,
+  onChanged,
+}: {
+  accountId: string;
+  category: Category;
+  onChanged: () => Promise<unknown>;
+}) {
   const hex = useCategoryColor();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
-  const param = { categoryId: String(category.id) };
+  const param = { accountId, categoryId: String(category.id) };
   const update = useMutation({
     mutationFn: (json: { name?: string; color?: CategoryColor }) =>
-      ok(api.categories[":categoryId"].$patch({ param, json })),
+      ok(categoriesApi[":categoryId"].$patch({ param, json })),
     onSuccess: async () => {
       setRenaming(null);
       await onChanged();
     },
   });
   const remove = useMutation({
-    mutationFn: () => send(api.categories[":categoryId"].$delete({ param })),
+    mutationFn: () => send(categoriesApi[":categoryId"].$delete({ param })),
     onSuccess: onChanged,
   });
   const uses = `${category.activityCount} ${category.activityCount === 1 ? "activity" : "activities"}`;

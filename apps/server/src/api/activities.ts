@@ -146,11 +146,11 @@ export function activityRoutes(deps: AppDeps) {
       .where(eq(activityAnnotations.activityId, activityId))
       .get() ?? null;
   /** A category of the user's; anyone else's is a 400, as it's in the body. */
-  const assertCategory = (categoryId: number, userId: number) => {
+  const assertCategory = (categoryId: number, accountId: number) => {
     const found = db
       .select({ id: categories.id })
       .from(categories)
-      .where(and(eq(categories.id, categoryId), eq(categories.userId, userId)))
+      .where(and(eq(categories.id, categoryId), eq(categories.accountId, accountId)))
       .get();
     if (!found) throw new ApiError(400, "invalid_request", "categoryId: no such category");
   };
@@ -270,7 +270,7 @@ export function activityRoutes(deps: AppDeps) {
           const activity = findActivity(idParam(c, "activityId", "activity"), c.var.account.id);
           if (changes.categoryId != null) {
             if (!takesCategory(activity.kind)) throw notSpending(activity);
-            assertCategory(changes.categoryId, c.var.user.id);
+            assertCategory(changes.categoryId, c.var.account.id);
           }
           annotate(db, activity.id, changes);
           return c.json(
@@ -296,7 +296,7 @@ export function activityRoutes(deps: AppDeps) {
         ),
         (c) => {
           const { activityIds, categoryId } = c.req.valid("json");
-          assertCategory(categoryId, c.var.user.id);
+          assertCategory(categoryId, c.var.account.id);
           const ids = [...new Set(activityIds)];
           const found = [...chunks(ids)].flatMap((chunk) =>
             db

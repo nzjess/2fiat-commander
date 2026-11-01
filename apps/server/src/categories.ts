@@ -1,7 +1,7 @@
 import { merchantKey } from "@twofiat/client";
 import { and, asc, count, eq, gt, inArray, isNull, max, ne, or, sql } from "drizzle-orm";
 import { chunks, type Db, type Executor, IMMEDIATE } from "./db/db.ts";
-import { accounts, activities, activityAnnotations, categories, categoryRules } from "./db/schema.ts";
+import { activities, activityAnnotations, categories, categoryRules } from "./db/schema.ts";
 
 /**
  * The category palette, in the order new categories take them. Keys, not colours: the web app maps each to its
@@ -36,10 +36,10 @@ export class DuplicateCategoryError extends Error {
 }
 
 /**
- * The user's categories by name, each with how many activities (in all their accounts) it's on, and how many rules
- * set it (deleting the category deletes them).
+ * The account's categories by name, each with how many activities it's on, and how many rules set it (deleting the
+ * category deletes them).
  */
-export function listCategories(db: Db, userId: number) {
+export function listCategories(db: Db, accountId: number) {
   return db
     .select({
       id: categories.id,
@@ -50,19 +50,19 @@ export function listCategories(db: Db, userId: number) {
     })
     .from(categories)
     .leftJoin(activityAnnotations, eq(activityAnnotations.categoryId, categories.id))
-    .where(eq(categories.userId, userId))
+    .where(eq(categories.accountId, accountId))
     .groupBy(categories.id)
     .orderBy(sql`${categories.name} COLLATE NOCASE`, asc(categories.id))
     .all();
 }
 
-/** The palette's least-used colour among the user's categories, earliest in the palette on a tie. */
-export function nextColor(db: Db, userId: number): CategoryColor {
+/** The palette's least-used colour among the account's categories, earliest in the palette on a tie. */
+export function nextColor(db: Db, accountId: number): CategoryColor {
   const used = new Map<string, number>();
   for (const c of db
     .select({ color: categories.color })
     .from(categories)
-    .where(eq(categories.userId, userId))
+    .where(eq(categories.accountId, accountId))
     .all())
     used.set(c.color, (used.get(c.color) ?? 0) + 1);
   let best: CategoryColor = CATEGORY_COLORS[0];
@@ -70,14 +70,14 @@ export function nextColor(db: Db, userId: number): CategoryColor {
   return best;
 }
 
-/** Names are unique per user, ignoring case. */
-function assertNameFree(db: Db, userId: number, name: string, except?: number) {
+/** Names are unique per account, ignoring case. */
+function assertNameFree(db: Db, accountId: number, name: string, except?: number) {
   const clash = db
     .select({ id: categories.id })
     .from(categories)
     .where(
       and(
-        eq(categories.userId, userId),
+        eq(categories.accountId, accountId),
         sql`${categories.name} = ${name} COLLATE NOCASE`,
         except === undefined ? undefined : ne(categories.id, except),
       ),
@@ -86,12 +86,12 @@ function assertNameFree(db: Db, userId: number, name: string, except?: number) {
   if (clash) throw new DuplicateCategoryError(name);
 }
 
-export function createCategory(db: Db, userId: number, name: string, color?: CategoryColor): CategoryRow {
+export function createCategory(db: Db, accountId: number, name: string, color?: CategoryColor): CategoryRow {
   return db.transaction(() => {
-    assertNameFree(db, userId, name);
+    assertNameFree(db, accountId, name);
     return db
       .insert(categories)
-      .values({ userId, name, color: color ?? nextColor(db, userId) })
+      .values({ accountId, name, color: color ?? nextColor(db, accountId) })
       .returning()
       .get();
   }, IMMEDIATE);
@@ -103,7 +103,7 @@ export function updateCategory(
   changes: { name?: string; color?: CategoryColor },
 ): CategoryRow {
   return db.transaction(() => {
-    if (changes.name !== undefined) assertNameFree(db, category.userId, changes.name, category.id);
+    if (changes.name !== undefined) assertNameFree(db, category.accountId, changes.name, category.id);
     return (
       db.update(categories).set(changes).where(eq(categories.id, category.id)).returning().get() ?? category
     );
@@ -143,7 +143,7 @@ export interface AnnotationChanges {
 
 /**
  * Changes what's given of an activity's category and note, leaving the rest. An annotation left empty is deleted.
- * The caller checks the activity and category belong to the user, and that the activity's kind takes a category.
+ * The caller checks the activity and category belong to the account, and that the activity's kind takes a category.
  */
 export function annotate(db: Db, activityId: number, changes: AnnotationChanges): void {
   const set = {
@@ -229,8 +229,8 @@ export function ruleMatches(rule: RuleCondition, activity: Described): boolean {
   );
 }
 
-/** The user's rules in order, each with how many activities it has set. */
-export function listRules(db: Db, userId: number) {
+/** The account's rules in order, each with how many activities it has set. */
+export function listRules(db: Db, accountId: number) {
   return db
     .select({
       id: categoryRules.id,
@@ -242,19 +242,19 @@ export function listRules(db: Db, userId: number) {
     })
     .from(categoryRules)
     .leftJoin(activityAnnotations, eq(activityAnnotations.categoryRuleId, categoryRules.id))
-    .where(eq(categoryRules.userId, userId))
+    .where(eq(categoryRules.accountId, accountId))
     .groupBy(categoryRules.id)
     .orderBy(asc(categoryRules.position), asc(categoryRules.id))
     .all();
 }
 
-function assertRuleFree(db: Db, userId: number, rule: RuleCondition, except?: number) {
+function assertRuleFree(db: Db, accountId: number, rule: RuleCondition, except?: number) {
   const clash = db
     .select({ id: categoryRules.id })
     .from(categoryRules)
     .where(
       and(
-        eq(categoryRules.userId, userId),
+        eq(categoryRules.accountId, accountId),
         eq(categoryRules.match, rule.match),
         eq(categoryRules.pattern, rule.pattern),
         except === undefined ? undefined : ne(categoryRules.id, except),
@@ -264,18 +264,18 @@ function assertRuleFree(db: Db, userId: number, rule: RuleCondition, except?: nu
   if (clash) throw new DuplicateRuleError();
 }
 
-/** A new rule, last in the order. The caller checks the category is the user's and the pattern isn't empty. */
-export function createRule(db: Db, userId: number, rule: RuleCondition & { categoryId: number }): RuleRow {
+/** A new rule, last in the order. The caller checks the category is the account's and the pattern isn't empty. */
+export function createRule(db: Db, accountId: number, rule: RuleCondition & { categoryId: number }): RuleRow {
   return db.transaction(() => {
-    assertRuleFree(db, userId, rule);
+    assertRuleFree(db, accountId, rule);
     const last = db
       .select({ position: max(categoryRules.position) })
       .from(categoryRules)
-      .where(eq(categoryRules.userId, userId))
+      .where(eq(categoryRules.accountId, accountId))
       .get()?.position;
     return db
       .insert(categoryRules)
-      .values({ userId, ...rule, position: (last ?? -1) + 1 })
+      .values({ accountId, ...rule, position: (last ?? -1) + 1 })
       .returning()
       .get();
   }, IMMEDIATE);
@@ -293,7 +293,7 @@ export function updateRule(
 ): RuleRow {
   return db.transaction(() => {
     const next = { ...rule, ...changes };
-    assertRuleFree(db, rule.userId, next, rule.id);
+    assertRuleFree(db, rule.accountId, next, rule.id);
     if (next.categoryId !== rule.categoryId) {
       db.update(activityAnnotations)
         .set(move ? { categoryId: next.categoryId } : { categoryRuleId: null })
@@ -326,13 +326,13 @@ export function deleteRule(db: Db, ruleId: number, { clear = false }: { clear?: 
   }, IMMEDIATE);
 }
 
-/** Puts the user's rules in the given order, which must name each of them once. Returns false if it doesn't. */
-export function reorderRules(db: Db, userId: number, ids: number[]): boolean {
+/** Puts the account's rules in the given order, which must name each of them once. Returns false if it doesn't. */
+export function reorderRules(db: Db, accountId: number, ids: number[]): boolean {
   return db.transaction(() => {
     const mine = db
       .select({ id: categoryRules.id })
       .from(categoryRules)
-      .where(eq(categoryRules.userId, userId))
+      .where(eq(categoryRules.accountId, accountId))
       .all()
       .map((r) => r.id);
     if (
@@ -348,8 +348,8 @@ export function reorderRules(db: Db, userId: number, ids: number[]): boolean {
   }, IMMEDIATE);
 }
 
-/** Uncategorised spending, in all the user's accounts, or one account's from after `afterId` (a sync's new ones). */
-function uncategorized(q: Executor, scope: { userId: number } | { accountId: number; afterId: number }) {
+/** An account's uncategorised spending, or only what's after `afterId` (a sync's new ones). */
+function uncategorized(q: Executor, accountId: number, afterId?: number) {
   return q
     .select({
       id: activities.id,
@@ -360,12 +360,8 @@ function uncategorized(q: Executor, scope: { userId: number } | { accountId: num
     .leftJoin(activityAnnotations, eq(activityAnnotations.activityId, activities.id))
     .where(
       and(
-        "userId" in scope
-          ? inArray(
-              activities.accountId,
-              q.select({ id: accounts.id }).from(accounts).where(eq(accounts.userId, scope.userId)),
-            )
-          : and(eq(activities.accountId, scope.accountId), gt(activities.id, scope.afterId)),
+        eq(activities.accountId, accountId),
+        afterId === undefined ? undefined : gt(activities.id, afterId),
         inArray(activities.kind, [...CATEGORY_KINDS]),
         isNull(activityAnnotations.categoryId),
       ),
@@ -394,17 +390,17 @@ function setByRule(q: Executor, activityIds: number[], rule: Pick<RuleRow, "id" 
   return changed;
 }
 
-/** The uncategorised spending, in all the user's accounts, that a rule (saved or not) would categorise. */
-export function ruleCandidates(db: Db, userId: number, rule: RuleCondition): number[] {
-  return uncategorized(db, { userId })
+/** The account's uncategorised spending that a rule (saved or not) would categorise. */
+export function ruleCandidates(db: Db, accountId: number, rule: RuleCondition): number[] {
+  return uncategorized(db, accountId)
     .filter((a) => ruleMatches(rule, a))
     .map((a) => a.id);
 }
 
-/** Applies a rule to the existing uncategorised spending it matches, in all the user's accounts. Returns how many. */
+/** Applies a rule to its account's existing uncategorised spending that it matches. Returns how many. */
 export function applyRule(db: Db, rule: RuleRow): number {
   return db.transaction(() => {
-    return setByRule(db, ruleCandidates(db, rule.userId, rule), rule);
+    return setByRule(db, ruleCandidates(db, rule.accountId, rule), rule);
   }, IMMEDIATE);
 }
 
@@ -419,29 +415,58 @@ export function lastActivityId(q: Executor): number {
 }
 
 /**
- * Categorises a sync's new spending in an account (ids after `afterId`) by the user's rules, the first match
+ * Categorises a sync's new spending in an account (ids after `afterId`) by the account's rules, the first match
  * winning, in the caller's transaction. Returns how many it set.
  */
 export function applyRulesIn(q: Executor, accountId: number, afterId: number): number {
-  const userId = q
-    .select({ userId: accounts.userId })
-    .from(accounts)
-    .where(eq(accounts.id, accountId))
-    .get()?.userId;
-  if (userId === undefined) return 0;
   const rules = q
     .select()
     .from(categoryRules)
-    .where(eq(categoryRules.userId, userId))
+    .where(eq(categoryRules.accountId, accountId))
     .orderBy(asc(categoryRules.position), asc(categoryRules.id))
     .all();
   if (rules.length === 0) return 0;
   const byRule = new Map<RuleRow, number[]>();
-  for (const a of uncategorized(q, { accountId, afterId })) {
+  for (const a of uncategorized(q, accountId, afterId)) {
     const rule = rules.find((r) => ruleMatches(r, a));
     if (rule) byRule.set(rule, [...(byRule.get(rule) ?? []), a.id]);
   }
   let set = 0;
   for (const [rule, ids] of byRule) set += setByRule(q, ids, rule);
   return set;
+}
+
+/**
+ * Copies an account's categories and rules onto another, in the caller's transaction: a one-time copy with no link
+ * left between them. What's categorised stays behind, since activities belong to their account.
+ */
+export function copyCategoriesIn(q: Executor, fromAccountId: number, toAccountId: number): void {
+  const copied = new Map<number, number>();
+  for (const { id, name, color } of q
+    .select()
+    .from(categories)
+    .where(eq(categories.accountId, fromAccountId))
+    .all()) {
+    const copy = q
+      .insert(categories)
+      .values({ accountId: toAccountId, name, color })
+      .returning({ id: categories.id })
+      .get();
+    copied.set(id, copy.id);
+  }
+  for (const { categoryId, match, pattern, position } of q
+    .select()
+    .from(categoryRules)
+    .where(eq(categoryRules.accountId, fromAccountId))
+    .all()) {
+    q.insert(categoryRules)
+      .values({
+        accountId: toAccountId,
+        categoryId: copied.get(categoryId) as number,
+        match,
+        pattern,
+        position,
+      })
+      .run();
+  }
 }
