@@ -4,7 +4,7 @@ import Database, { type RunResult } from "better-sqlite3";
 import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
-import { backup } from "../backup.ts";
+import { backup, pruneBackups } from "../backup.ts";
 import * as schema from "./schema.ts";
 
 export type Db = BetterSQLite3Database<typeof schema>;
@@ -14,6 +14,7 @@ export type Executor = BaseSQLiteDatabase<"sync", RunResult, typeof schema>;
 // Not `.pathname`, which keeps a path's spaces percent-encoded (e.g. a checkout in "~/Applications/2fiat Commander").
 const MIGRATIONS = fileURLToPath(new URL("../../drizzle", import.meta.url));
 const MIGRATIONS_TABLE = "__drizzle_migrations";
+const MIGRATION_COPIES_KEPT = 3;
 
 /** Opens (or creates) the database and applies any pending migrations. Pass ":memory:" for tests. */
 export function openDb(path: string, options: { migrationsFolder?: string } = {}): Db {
@@ -38,7 +39,8 @@ export function openDb(path: string, options: { migrationsFolder?: string } = {}
  * - Foreign keys are off throughout, set before the transaction, as the pragma does nothing inside one. With them on,
  *   the `DROP TABLE` in a rebuild fires `ON DELETE CASCADE` and empties the child tables.
  * - `foreign_key_check` runs before the commit, so a migration that breaks a reference leaves nothing behind.
- * A database with data in it is copied first, to `pre-migration/` beside it. These copies are never pruned.
+ * A database with data in it is copied first, to `pre-migration/` beside it, keeping the newest few. They're pruned
+ * before the migration runs, so a migration that fails on every restart can't fill the disk with copies.
  */
 function applyMigrations(sqlite: Database.Database, db: Db, path: string, folder: string): void {
   const migrations = readMigrationFiles({ migrationsFolder: folder });
@@ -60,7 +62,9 @@ function applyMigrations(sqlite: Database.Database, db: Db, path: string, folder
   const { fresh, todo } = pending();
   if (todo.length === 0) return;
   if (!fresh) {
-    const copy = backup(db, join(dirname(path), "pre-migration"));
+    const dir = join(dirname(path), "pre-migration");
+    const copy = backup(db, dir);
+    pruneBackups(dir, MIGRATION_COPIES_KEPT);
     console.log(`applying ${todo.length} migration(s), with a copy of the database at ${copy}`);
   }
 

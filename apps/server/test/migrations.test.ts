@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -172,6 +180,31 @@ describe("migrations", () => {
     const names = copiesBeside(path);
     expect(names).toHaveLength(1);
     expect(counts(join(path, "..", "pre-migration", names[0] as string))).toEqual(BEFORE);
+    vi.restoreAllMocks();
+  });
+
+  test.each([
+    ["succeeds", "ALTER TABLE users ADD COLUMN extra text"],
+    ["fails", "THIS IS NOT SQL"],
+  ])("only the newest 3 copies are kept when a migration %s", (outcome, migration) => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const path = populated();
+    const dir = join(path, "..", "pre-migration");
+    mkdirSync(dir);
+    const older = ["20200101", "20200102", "20200103", "20200104"].map((day) => `commander-${day}-000000.db`);
+    for (const name of [...older, "keep-me.txt"]) writeFileSync(join(dir, name), "");
+
+    const open = () => client(openDb(path, { migrationsFolder: folderWith(migration) })).close();
+    if (outcome === "fails") expect(open).toThrow();
+    else open();
+
+    const names = copiesBeside(path);
+    expect(names).toContain("keep-me.txt");
+    expect(names).toContain(older[3]);
+    expect(names).toContain(older[2]);
+    expect(names).not.toContain(older[1]);
+    expect(names).not.toContain(older[0]);
+    expect(names).toHaveLength(4);
     vi.restoreAllMocks();
   });
 
