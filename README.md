@@ -31,7 +31,7 @@ You need [proto](https://moonrepo.dev/proto), which installs the Node and pnpm v
 its own clone, separate from any checkout you develop in, because the clone it runs from becomes the installed app.
 
 ```sh
-git clone git@github.com:nzjess/twofiat-commander.git ~/Applications/"2fiat Commander"
+git clone git@github.com:nzjess/2fiat-commander.git ~/Applications/"2fiat Commander"
 cd ~/Applications/"2fiat Commander"
 proto use
 pnpm install
@@ -56,7 +56,7 @@ and the Keychain secret.
 ## Install on StartOS
 
 The StartOS package is in its own repo:
-[nzjess/twofiat-commander-startos](https://github.com/nzjess/twofiat-commander-startos).
+[nzjess/2fiat-commander-startos](https://github.com/nzjess/2fiat-commander-startos).
 
 ## Licence
 

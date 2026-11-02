@@ -13,14 +13,15 @@ import { openDb } from "../src/db/db.ts";
 
 // For setting up a user by hand, and the only way to change a password.
 //   pnpm user:add <username>      pnpm user:passwd <username>
+//   pnpm user:set <username>      creates the user, or changes their password if they exist
 
 const [command, username] = process.argv.slice(2);
-if ((command !== "add" && command !== "passwd") || !username) {
-  console.error("usage: user.ts add|passwd <username>");
+if ((command !== "add" && command !== "passwd" && command !== "set") || !username) {
+  console.error("usage: user.ts add|passwd|set <username>");
   process.exit(2);
 }
 
-if (command === "add" && !USERNAME_PATTERN.test(username)) {
+if (command !== "passwd" && !USERNAME_PATTERN.test(username)) {
   console.error(`a username ${USERNAME_RULE}`);
   process.exit(1);
 }
@@ -90,6 +91,9 @@ if (command === "add") {
   console.log(`added user ${username}`);
 } else if (setPassword(db, username, hashed)) {
   console.log(`changed the password of ${username}, and signed them out everywhere`);
+} else if (command === "set") {
+  createUser(db, username, hashed);
+  console.log(`added user ${username}`);
 } else {
   console.error(`no user ${username}`);
   process.exit(1);

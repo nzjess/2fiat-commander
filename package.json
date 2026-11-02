@@ -14,6 +14,7 @@
     "report": "node packages/twofiat-client/scripts/report.ts",
     "user:add": "node --env-file-if-exists=.env apps/server/scripts/user.ts add",
     "user:passwd": "node --env-file-if-exists=.env apps/server/scripts/user.ts passwd",
+    "user:set": "node --env-file-if-exists=.env apps/server/scripts/user.ts set",
     "app": "node apps/server/scripts/app.ts"
   },
   "devDependencies": {

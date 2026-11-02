@@ -12,8 +12,8 @@ export class Secrets {
     const master = Buffer.from(appSecret, "base64");
     if (master.length < 32) throw new Error("the app secret must be at least 32 bytes, base64-encoded");
     const derive = (info: string) => Buffer.from(hkdfSync("sha256", master, "", info, 32));
-    this.#encryptionKey = derive("twofiat-commander/aes-256-gcm");
-    this.#hmacKey = derive("twofiat-commander/hmac-sha256");
+    this.#encryptionKey = derive("2fiat-commander/aes-256-gcm");
+    this.#hmacKey = derive("2fiat-commander/hmac-sha256");
   }
 
   /** AES-256-GCM with a random IV, as `v1:<iv>:<ciphertext>:<tag>` in base64url. */
